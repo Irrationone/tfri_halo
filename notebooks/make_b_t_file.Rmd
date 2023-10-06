@@ -1,0 +1,99 @@
+---
+title: "B & T cell analysis"
+output: 
+  html_document:
+      code_folding: hide
+---
+
+
+```{r global_chunk_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(pheatmap)
+library(readxl)
+```
+
+```{r}
+clinical_data_file <- "../bc-1508_tma_clin_data_2023-08-07.xlsx"
+b_t_data_file <- "../B&T Panel/FINAL all TMAs B+T cell densities 22JUN2023- do not edit.xlsx"
+map_file_22_004_file <- "../22-004_revised_map.xlsx"
+
+clinical_data <- read_excel(clinical_data_file, sheet = "bc-1508")
+b_t_data <- read_excel(b_t_data_file)
+map_file_22_004 <- read_excel(map_file_22_004_file, sheet = "Core ID", skip = 2)
+
+b_t_data <- b_t_data %>%
+  mutate(array=str_extract(`Image Tag`, "^[^\\s]+"),
+         extracted_triples = str_extract(`Image Tag`, "(?<=Core\\[)[^\\]]+(?=\\])"),
+         core_position = map(extracted_triples, ~ strsplit(.x, ",")[[1]])) %>%
+  select(-c(extracted_triples))
+```
+
+## Map 22-004
+
+```{r}
+b_t_data_22004 <- b_t_data %>% 
+  filter(array == "22-004") %>%
+  mutate(
+    subarray=str_extract(`Image Tag`, "(?<=.)[^_](?=_B\\+T)")
+  )
+
+nindexes <- c(
+  "A"=312,
+  "B"=152
+)
+
+# Recompute index based on Christine's remapping
+# x: sector, col, row
+proper_index <- function(x, max_index, sector_rowmax = 7, sector_colmax = 12, repeats = 2) {
+  x <- as.numeric(x)
+  max_row <- ceiling(max_index/sector_colmax)
+  true_sector <- floor((x[1] - 1)/2) * 2 + (x[1] %% 2) + 1
+  floor_sector_rows <- (true_sector - 1) * sector_rowmax
+  true_row <- floor_sector_rows + (min(max_row - floor_sector_rows, sector_rowmax) - x[3] + 1)
+  
+  floor_row <- (true_row - 1) * sector_colmax
+  row_direction <- -2 * ((true_row - 1) %% 2) + 1
+  true_col <- ifelse(row_direction == 1, x[2], sector_colmax - x[2] + 1)
+  
+  index <- ceiling((floor_row + true_col)/repeats)
+  return(index)
+}
+
+
+b_t_data_22004 <- b_t_data_22004 %>%
+  mutate(
+    maxind = unname(nindexes[subarray]),
+    CoreID = map2_dbl(core_position, maxind, ~ proper_index(.x, max_index = .y))
+  ) %>%
+  ## Add 156 as offset for B
+  mutate(
+    CoreID = ifelse(subarray == "B", CoreID + 156, CoreID)
+  )
+
+core_map_22004 <- map_file_22_004 %>% 
+  select(CoreID, StudyID, `Accession #`, `Block ID(s)`) %>%
+  rename(`Accession#`=`Accession #`, `Block#`=`Block ID(s)`)
+
+## Merge in Accession, Block, and StudyID cols (StudyID is unique to 22-004, but Samuel's data will have both columns)
+b_t_data_22004 <- b_t_data_22004 %>%
+  select(-c(`Block#`, `Accession#`)) %>%
+  left_join(core_map_22004, by = "CoreID") %>%
+  select(`Accession#`, `Block#`, everything())
+
+## Need to deal with the fact that StudyIDs have extra 0's and hyphens in front of the VOA's (who added these????)
+```
+
+```{r}
+b_t_data_revised <- b_t_data %>% 
+  filter(array != "22-004") %>%
+  bind_rows(b_t_data_22004) %>%
+  select(-c(core_position, maxind)) %>% 
+  select(`Accession#`, `Block#`, StudyID, CoreID, array, subarray, everything())
+
+write.table(b_t_data_revised, file = "../data/b_t_data_revised.tsv", sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+

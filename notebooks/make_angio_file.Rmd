@@ -1,0 +1,166 @@
+---
+title: "Angio data preprocessing"
+output: 
+  html_document:
+      code_folding: hide
+---
+
+
+```{r global_chunk_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(janitor)
+library(pheatmap)
+library(readxl)
+```
+
+```{r}
+angio_dir <- "../Angio Panel"
+clinical_data_file <- "../bc-1508_tma_clin_data_2023-08-07.xlsx"
+angio_map_files <- dir_ls(file.path(angio_dir, "Angio SectorMaps"), regexp = ".xls(x)?")
+
+
+sectormaps <- list(
+  '10-005'=read_excel(angio_map_files[1], sheet = "SectorMap-HALO", col_names = FALSE, skip = 2),
+  '10-006'=read_excel(angio_map_files[2], sheet = "SectorMap-HALO2", col_names = FALSE, skip = 2),
+  '22-004A'=read_excel(angio_map_files[3], sheet = "SectorMap A-HALO", col_names = FALSE, skip = 2),
+  '22-004B'=read_excel(angio_map_files[3], sheet = "SectorMap B-HALO", col_names = FALSE, skip = 2)
+)
+
+core_ids <- list(
+  '10-005'=read_excel(angio_map_files[1], sheet = "CoreID", skip = 2),
+  '10-006'=read_excel(angio_map_files[2], sheet = "CoreID", skip = 2),
+  '22-004A'=read_excel(angio_map_files[3], sheet = "Core ID", skip = 2),
+  '22-004B'=read_excel(angio_map_files[3], sheet = "Core ID", skip = 2)
+)
+
+# Takes the annoying sectormap format and converts into something actually workable
+# Divides Excel sector map into sub-grids, and then converts those into long format
+convert_sectormap_to_long <- function(sectormap) {
+  sectormat <- as.matrix(sectormap)
+  
+  nr <- nrow(sectormat)
+  nc <- ncol(sectormat)
+  
+  heading_locs <- str_detect(sectormat, "^Sector") %>% which
+  heading_rows <- heading_locs %% nr
+  heading_cols <- floor(heading_locs / nr) + 1
+  
+  core_map <- lapply(1:length(heading_rows), function(i) {
+    start_row <- heading_rows[i]
+    start_col <- heading_cols[i]
+    end_row <- min(heading_rows[heading_rows > start_row] - 1, nr, na.rm = TRUE)
+    end_col <- min(heading_cols[heading_cols > start_col] - 1, nc, na.rm = TRUE)
+    
+    df <- sectormat[start_row:end_row,start_col:end_col] %>% 
+      as_tibble %>% 
+      row_to_names(row_number = 1) 
+    colnames(df)[1] <- "row"
+    
+    df %>% 
+      gather(col, core, -row) %>%
+      filter(!is.na(core)) %>%
+      mutate(core = as.numeric(core), row = as.numeric(row)) %>%
+      arrange(row, col)
+  }) %>% bind_rows()
+  
+  return(core_map)
+}
+
+```
+
+```{r}
+sectormaps_long <- lapply(names(sectormaps), function(x) {
+  convert_sectormap_to_long(sectormaps[[x]]) %>%
+    mutate(tma=x) %>%
+    select(tma, everything())
+}) %>% bind_rows()
+
+core_ids_long <- lapply(names(core_ids), function(x) {
+  df <- core_ids[[x]] %>%
+    mutate(tma=x) %>%
+    rename(core=CoreID) %>%
+    select(tma, everything())
+  colnames(df) <- str_replace(colnames(df), "( )*#$", "")
+  return(df)
+}) %>% bind_rows()
+
+# Sample map, in long format, derived from the weird TMA maps
+sample_map <- sectormaps_long %>% 
+  inner_join(core_ids_long) %>%
+  rename(acc_num=Accession, block=Block, backup=Backup) %>%
+  select(tma, core, row, col, acc_num, block, backup)
+```
+
+
+```{r}
+angio_data_dir <- file.path(angio_dir, "Final FL 10-005 10-006 22-004A-B Angio")
+angio_data_files <- dir_ls(angio_data_dir, regexp = ".xls(x)?")
+
+erg_data_file <- angio_data_files[str_detect(angio_data_files, "ERG1")]
+other_data_files <- angio_data_files[!str_detect(angio_data_files, "ERG1")]
+```
+
+
+
+```{r}
+erg_sheets <- excel_sheets(erg_data_file)
+
+erg_data <- lapply(erg_sheets, function(x) {
+  df <- read_excel(erg_data_file, sheet = x, na = c("", "x"))
+  df <- df %>%
+    rename(row=`TMA Row`,
+           col=`TMA Column`,
+           tma=`TMA Block Name`,
+           notes=Notes) %>%
+    select(-c(`Image Stain`)) %>%
+    mutate(tma=str_extract(x, "[0-9]{2}\\-[0-9]{3}[A-Z]?"))
+  
+  return(df)
+}) %>% bind_rows()
+
+erg_data_labeled <- erg_data %>%
+  inner_join(sample_map) %>%
+  select(tma, acc_num, row, col, notes, everything()) %>%
+  arrange(tma, row, col, acc_num)
+```
+
+
+```{r}
+non_erg_data <- lapply(other_data_files, function(fp) {
+  sheetnames <- excel_sheets(fp)
+  
+  region_dfs <- lapply(sheetnames, function(x) {
+    df <- read_excel(fp, sheet = x, na = c("", "x", "tk"))
+    df <- df %>%
+      rename(row=`TMA Row`,
+             col=`TMA Column`,
+             tma=`TMA Block Name`,
+             notes=Notes) %>%
+      select(-c(`Image Stain`, `Area Analyzed (μm²)`)) %>%
+      mutate(tma=str_extract(x, "[0-9]{2}\\-[0-9]{3}[A-Z]?"))
+    
+    return(df)
+  }) 
+  
+  region_dfs_merged <- region_dfs %>% reduce(inner_join)
+}) %>% bind_rows()
+
+non_erg_data_labeled <- non_erg_data %>%
+  inner_join(sample_map) %>%
+  select(tma, acc_num, row, col, notes, everything()) %>%
+  arrange(tma, row, col, acc_num)
+```
+
+
+```{r}
+output_dir <- "../data"
+
+write.table(erg_data_labeled, file = file.path(output_dir, "erg_data_labeled.tsv"), sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE, append = FALSE)
+write.table(non_erg_data_labeled, file = file.path(output_dir, "non_erg_data_labeled.tsv"), sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE, append = FALSE)
+```
+
+

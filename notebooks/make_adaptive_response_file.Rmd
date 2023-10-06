@@ -1,0 +1,166 @@
+---
+title: "Adaptive response preprocessing"
+output: 
+  html_notebook:
+      code_folding: hide
+---
+
+
+```{r global_chunk_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(janitor)
+library(pheatmap)
+library(readxl)
+```
+
+```{r}
+ar_dir <- "../AdaptR Panel"
+clinical_data_file <- "../bc-1508_tma_clin_data_2023-08-07.xlsx"
+ar_map_files <- file.path(ar_dir, "AdaptR Final (minus CD8-PD1)", 
+                          c("10-005 G3 Endometrioid Endometrial Carcinoma.xls",
+                            "10-006 High-Grade Serous Endometrial Carcinoma.xls",
+                            "22-004 P53 Abnormal Endometrial Carcinoma Tumours (mixed sites) - BnT_AR Map.xlsx")
+)
+
+
+sectormaps <- list(
+  '10-005'=read_excel(ar_map_files[1], sheet = "SectorMap-AR_SDM", col_names = FALSE, skip = 2),
+  '10-006'=read_excel(ar_map_files[2], sheet = "SectorMap-AR-SDM", col_names = FALSE, skip = 2),
+  '22-004A'=read_excel(ar_map_files[3], sheet = "SectorMap A-AR-SDM", col_names = FALSE, skip = 2),
+  '22-004B'=read_excel(ar_map_files[3], sheet = "SectorMap B-AR-SDM", col_names = FALSE, skip = 2)
+)
+
+core_ids <- list(
+  '10-005'=read_excel(ar_map_files[1], sheet = "CoreID", skip = 2),
+  '10-006'=read_excel(ar_map_files[2], sheet = "CoreID", skip = 2),
+  '22-004A'=read_excel(ar_map_files[3], sheet = "Core ID", skip = 2),
+  '22-004B'=read_excel(ar_map_files[3], sheet = "Core ID", skip = 2)
+)
+```
+
+```{r}
+# Divides Excel sector map into sub-grids, and then converts those into long format
+convert_sectormap_to_long <- function(sectormap) {
+  sectormat <- as.matrix(sectormap)
+  
+  nr <- nrow(sectormat)
+  nc <- ncol(sectormat)
+  
+  heading_locs <- str_detect(sectormat, "^Sector") %>% which
+  heading_rows <- heading_locs %% nr
+  heading_cols <- floor(heading_locs / nr) + 1
+  
+  core_map <- lapply(1:length(heading_rows), function(i) {
+    start_row <- heading_rows[i]
+    start_col <- heading_cols[i]
+    
+    end_row <- min(heading_rows[heading_rows > start_row] - 1, nr, na.rm = TRUE)
+    end_col <- min(heading_cols[heading_cols > start_col] - 1, nc, na.rm = TRUE)
+    
+    sector_label <- str_extract(sectormat[start_row, start_col], "[0-9]+")
+    
+    df <- sectormat[start_row:end_row,start_col:end_col] %>% 
+      as_tibble %>% 
+      row_to_names(row_number = 1) 
+    colnames(df)[1] <- "row"
+    
+    all_na_cols <- sapply(df, function(x) all(is.na(x)))
+    
+    df <- df[,!all_na_cols]
+    
+    df %>% 
+      gather(col, core, -row) %>%
+      filter(!is.na(core)) %>%
+      mutate(core = as.numeric(core), row = as.numeric(row), sector = as.numeric(sector_label),
+             col = as.numeric(col)) %>%
+      arrange(row, col)
+  }) %>% bind_rows()
+  
+  return(core_map)
+}
+```
+
+```{r}
+sectormaps_long <- lapply(names(sectormaps), function(x) {
+  convert_sectormap_to_long(sectormaps[[x]]) %>%
+    mutate(tma=x) %>%
+    select(tma, everything())
+}) %>% bind_rows()
+
+core_ids_long <- lapply(names(core_ids), function(x) {
+  df <- core_ids[[x]] %>%
+    mutate(tma=x) %>%
+    rename(core=CoreID) %>%
+    select(tma, everything())
+  colnames(df) <- str_replace(colnames(df), "( )*#$", "")
+  return(df)
+}) %>% bind_rows()
+
+# Sample map, in long format, derived from the weird TMA maps
+sample_map <- sectormaps_long %>% 
+  inner_join(core_ids_long) %>%
+  rename(acc_num=Accession, block=Block, backup=Backup) %>%
+  select(tma, sector, core, row, col, acc_num, block, backup)
+```
+
+For whatever reason we have area quants for all arrays, but I guess the phenotyping is not done for 22-004 so we only have it for 10-005 and 10-006. We won't analyze that data for now, because most of the p53abn samples are in 22-004, and I don't know if we're going to get the rest soon (?). 
+
+```{r}
+area_quant_files <- file.path(ar_dir, "AdaptR Final (minus CD8-PD1)",
+                              c(
+                                "FINAL 10-005&6 ADAPTR AREA QUANT 30JUN23.xlsx",
+                                "22-004 A B AdaptR FINAL data 30JUNE2023.xlsx"
+                              ))
+
+area_quant <- lapply(area_quant_files, function(area_quant_file) {
+  df <- read_excel(area_quant_file, na = c("", "x"))
+  df <- df %>%
+    rename(
+      notes=Notes
+    ) %>%
+    mutate(tma=str_extract(`Image Tag`, "^[0-9]{2}_[0-9]{3}[A-Z]?")) %>%
+    ## The labeling scheme seems to be different each time ... 
+    mutate(
+      tma = dplyr::recode(tma,
+                          "10_005V"="10-005",
+                          "10_006V"="10-006",
+                          "22_004A"="22-004A",
+                          "22_004V"="22-004B")
+    ) %>%
+    mutate(
+      secrowcol=str_extract(`Image Tag`, "(?<=Core\\[)[0-9,]+(?=\\])")
+    ) %>%
+    separate(secrowcol, sep = ",", c("sector", "row2", "col2")) %>%
+    mutate(
+      sector = as.numeric(sector),
+      row = ifelse(tma == "22-004B", as.numeric(col2), as.numeric(row2)),
+      col = ifelse(tma == "22-004B", as.numeric(row2), as.numeric(col2))
+    ) %>%
+    select(-c(row2, col2))
+  
+  ## Annoyingly, the naming convention is actually DIFFERENT between different arrays (e.g. IDO-1 and IDO1) ...
+  colnames(df) <- colnames(df) %>% 
+    str_replace_all("PD\\-L1", "PDL1") %>%
+    str_replace_all("PDL\\-1", "PDL1") %>%
+    str_replace_all("IDO\\-1", "IDO1") %>%
+    str_replace_all("PD\\-1", "PD1") %>%
+    str_replace_all("CD68\\+PDL1\\-IDO1\\-", "CD68+IDO1-PDL1-")
+  
+  return(df)
+}) %>% bind_rows()
+
+area_quant_labeled <- area_quant %>%
+  left_join(sample_map) %>%
+  select(tma, acc_num, sector, row, col, core, notes, everything()) %>%
+  arrange(tma, sector, row, col, acc_num)
+```
+
+```{r}
+output_dir <- "../data"
+
+write_tsv(area_quant_labeled, file = file.path(output_dir, "AR_area_labeled.tsv"))
+```
