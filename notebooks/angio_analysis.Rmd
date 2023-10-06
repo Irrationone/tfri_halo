@@ -1,0 +1,839 @@
+---
+title: "Angio analysis"
+output: 
+  html_document:
+      code_folding: hide
+      toc: true
+      toc_float: true
+---
+
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(readxl)
+library(ComplexHeatmap)
+library(textclean)
+library(survival)
+library(survminer)
+library(circlize)
+library(glmnet)
+library(reticulate)
+library(ggupset)
+library(ggforce)
+library(RColorBrewer)
+library(car)
+```
+
+# Data
+
+```{r}
+erg_data_file <- "../data/erg_data_labeled.tsv"
+non_erg_data_file <- "../data/non_erg_data_labeled.tsv"
+
+erg_data_raw <- read_tsv(erg_data_file)
+non_erg_data_raw <- read_tsv(non_erg_data_file)
+```
+
+Discard samples labeled as such during annotation.
+
+```{r}
+erg_data <- erg_data_raw %>%
+  filter(is.na(notes) | str_detect(notes, "(?i)discard", negate = TRUE)) %>%
+  filter(!notes %in% c("Necrosis", "Tissue fold")) %>%
+  mutate(acc_num=str_replace(acc_num, "-(0+)", "-")) %>%
+  mutate(acc_num=str_replace(acc_num, " \\(.*", ""))
+
+non_erg_data <- non_erg_data_raw %>%
+  filter(is.na(notes) | str_detect(notes, "(?i)discard", negate = TRUE)) %>%
+  mutate(acc_num=str_replace(acc_num, "-(0+)", "-")) %>%
+  mutate(acc_num=str_replace(acc_num, " \\(.*", ""))
+```
+
+```{r}
+erg_data %>% dim
+```
+
+```{r}
+non_erg_data %>% dim
+```
+
+## ERG table
+
+Really, all we care about here is the number and density of ERG positive cells. We'll get an idea of what all these columns mean first. 
+
+Many of these columns are redundant. For example, ERG1 Strong Positive Cells is identical to ERG1 Strong Positive Nuclei. I'm going to assume that the phenotyper columns are the final, reliable estimates of ERG1+ cells for now. 
+
+```{r}
+ggplot(erg_data, aes(x=`Vessel: T7 ERG1 AI phenotyper 18May2023 - ERG1+ Cells`, y=`Vessel: ERG1 Positive Nuclei`)) + 
+  geom_point(alpha = 0.2) + 
+  geom_abline(slope=1, colour='red', alpha = 0.3) +
+  scale_x_log10() + 
+  scale_y_log10() + 
+  theme_pubr()
+```
+
+These are the only columns we really need from the table. 
+
+```{r}
+features_to_select <- c("Total Cells", "T7 ERG1 AI phenotyper 18May2023 - ERG1+ Cells", "T7 ERG1 AI phenotyper 18May2023 - ERG1- Cells")
+
+
+erg_data_selected <- erg_data %>%
+  select(c(
+    "tma", "acc_num", "row", "col", "Classified Area (mm²)", "Glass Area (mm²)", "Other Area (mm²)",
+    "Stroma Area (mm²)", "Tumour Area (mm²)", "Vessel Area (mm²)", 
+    apply(expand.grid(c("Tumour", "Stroma", "Vessel"), features_to_select), 1, paste, collapse=": ")
+  ))
+  
+erg_data_summarized_long <- erg_data_selected %>%
+  gather(variable, value, -c("tma", "acc_num", "row", "col")) %>%
+  mutate(value = replace_na(value, 0)) %>%
+  group_by(tma, acc_num, variable) %>%
+  summarise(value=sum(value)) %>%
+  ungroup()
+```
+
+## Non-ERG data
+
+Next we'll look at the non-ERG data. 
+
+From what I can see, Area = Weak + Moderate + Strong for the corresponding marker and region. PanCK and CD31 were used to define tumour and vessel areas, according to Spencer. 
+
+Vessel area is clearly not included in stroma area, as some cores have higher vessel area than stroma area; so we'll treat all areas as independent from one another. 
+
+```{r}
+features_to_select <- c("VEGFR2 Area (μm²)", "VEGFR2 Weak Area (μm²)", "VEGFR2 Moderate Area (μm²)", "VEGFR2 Strong Area (μm²)",
+                        "PODO447 Area (μm²)", "PODO447 Weak Area (μm²)", "PODO447 Moderate Area (μm²)", "PODO447 Strong Area (μm²)",
+                        "VEGFA Area (μm²)", "VEGFA Weak Area (μm²)", "VEGFA Moderate Area (μm²)", "VEGFA Strong Area (μm²)",
+                        "PODO+VEGFR+ Area (μm²)", "VEGFR2+VEGFA+ Area (μm²)", "PODO+VEGFA+ Area (μm²)",
+                        "PODO+VEGFR+VEGFA+ Area (μm²)", 
+                        "VEGFR2 Average Positive Intensity", "PODO447 Average Positive Intensity", "VEGFA Average Positive Intensity",
+                        "PODO+VEGFR+ VEGFR2 Average Intensity", "PODO+VEGFR+ PODO447 Average Intensity", "PODO+VEGFR+ VEGFA Average Intensity",
+                        "VEGFR2+VEGFA+ VEGFR2 Average Intensity", "VEGFR2+VEGFA+ PODO447 Average Intensity", "VEGFR2+VEGFA+ VEGFA Average Intensity",
+                        "PODO+VEGFA+ VEGFR2 Average Intensity", "PODO+VEGFA+ PODO447 Average Intensity", "PODO+VEGFA+ VEGFA Average Intensity",
+                        "PODO+VEGFR+VEGFA+ VEGFR2 Average Intensity", "PODO+VEGFR+VEGFA+ PODO447 Average Intensity", "PODO+VEGFR+VEGFA+ VEGFA Average Intensity")
+
+non_erg_data_selected <- non_erg_data %>%
+  select(c(
+    "tma", "acc_num", "row", "col", "Classified Area (mm²)", "Glass Area (mm²)", "Other Area (mm²)",
+    "Stroma Area (mm²)", "Tumour Area (mm²)", "Vessel Area (mm²)",
+    apply(expand.grid(c("Tumour", "Stroma", "Vessel"), features_to_select), 1, paste, collapse=": ")
+  ))
+
+## Consistency is important -- will help us automate intensity summarization
+colnames(non_erg_data_selected) <- colnames(non_erg_data_selected) %>%
+  str_replace_all("VEGFR2", "VEGFR") %>%
+  str_replace_all("PODO447", "PODO")
+```
+
+```{r}
+## Summarize the areas first, as those only require summation
+non_erg_data_areas_long <- non_erg_data_selected %>%
+  gather(variable, value, -c("tma", "acc_num", "row", "col")) %>%
+  filter(str_detect(variable, "Area")) %>%
+  mutate(value = replace_na(value, 0)) %>%
+  ## Homogenize area units
+  mutate(value = ifelse(str_detect(variable, "μm²"), value/10^6, value)) %>%
+  mutate(variable = str_replace_all(variable, "μm²", "mm²"))
+
+non_erg_data_areas_summarized_long <- non_erg_data_areas_long %>%
+  group_by(tma, acc_num, variable) %>%
+  summarise(value=sum(value)) %>%
+  ungroup()
+
+
+## Get intensity variables
+non_erg_data_intensities <- non_erg_data_selected %>% 
+  gather(variable, value, -c("tma", "acc_num", "row", "col")) %>%
+  filter(str_detect(variable, "Intensity")) %>%
+  mutate(value = replace_na(value, 0)) %>%
+  rename(intensity=value)
+
+## Parse corresponding area string
+non_erg_data_intensities <- non_erg_data_intensities %>%
+  mutate(corresponding_area=str_replace(trimws(str_replace(variable, "[A-Z]+ Average (Positive )?Intensity", "")), "\\:$", "")) %>%
+  mutate(corresponding_area = paste0(corresponding_area, " Area (mm²)"))
+
+non_erg_data_intensities_areas <- non_erg_data_intensities %>%
+  left_join(non_erg_data_areas_long %>%
+              rename(corresponding_area=variable, area=value))
+
+## Summarize over cores for the same tma and acc_num
+non_erg_data_average_intensities_by_tma_sample <- non_erg_data_intensities_areas %>%
+  group_by(tma, acc_num, variable, corresponding_area) %>%
+  summarise(intensity=sum(intensity*area)/sum(area),
+            area=sum(area)) %>%
+  ungroup()
+
+non_erg_data_average_intensities_by_sample <- non_erg_data_intensities_areas %>%
+  group_by(acc_num, variable, corresponding_area) %>%
+  summarise(intensity=sum(intensity*area)/sum(area),
+            area=sum(area)) %>%
+  ungroup()
+```
+
+## Heatmap
+
+### Intensities
+
+#### By TMA
+
+We'll look for batch effects first by looking at results stratified by sample and TMA. 
+
+```{r}
+intensities_by_tma_sample_wide <- non_erg_data_average_intensities_by_tma_sample %>%
+  select(-c(corresponding_area, area)) %>%
+  spread(key = variable, value = intensity) %>%
+  mutate(unique_id=paste0(tma, "_", acc_num)) %>%
+  select(-c(tma, acc_num)) %>%
+  select(unique_id, everything())
+
+intensities_by_tma_sample_matrix <- intensities_by_tma_sample_wide %>%
+  column_to_rownames("unique_id") %>% 
+  scale
+
+intensities_by_tma_sample_matrix_filtered <- intensities_by_tma_sample_matrix[rowSums(is.na(intensities_by_tma_sample_matrix)) != ncol(intensities_by_tma_sample_matrix),]
+
+intensities_by_tma_sample_matrix_filtered <- intensities_by_tma_sample_matrix_filtered[,colSums(is.na(intensities_by_tma_sample_matrix_filtered)) != nrow(intensities_by_tma_sample_matrix_filtered)]
+  
+row_annos <- data.frame(
+  unique_id=rownames(intensities_by_tma_sample_matrix_filtered)
+) %>%
+  mutate(tma=str_extract(unique_id, "^[0-9]{2}\\-[0-9]{3}([A-Z])?")) %>%
+  column_to_rownames("unique_id")
+
+col_annos <- data.frame(
+  name=colnames(intensities_by_tma_sample_matrix_filtered)
+) %>%
+  mutate(region=str_extract(name, "^[A-Za-z]+")) %>%
+  column_to_rownames("name")
+
+ra <- rowAnnotation(df = row_annos)
+ca <- columnAnnotation(df = col_annos)
+
+
+intensity_heatmap <- Heatmap(scale(intensities_by_tma_sample_matrix_filtered),
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           column_names_rot = 80, 
+                           show_row_names = FALSE) + ra
+
+
+draw(intensity_heatmap, heatmap_legend_side = "right")
+```
+
+Substantial batch effects with VEGFA, and smaller batch effects with the others. 
+
+Spencer noted the following about the VEGFA stain:
+* VEGFA stained all epithelial cells
+* VEGFA had edge artifact on the TMA 
+
+So we decided to exclude VEGFA from all further analysis as the readouts would likely be uninterpretable, even if we could do proper batch correction. 
+
+We do see minor batch effects with the remainder, so we'll see if Weak/Moderate/Strong categorization. resolved those. We'll first take the thresholds used for weak/moderate/strong categorization.
+
+```{r}
+angio_threshold_file <- "../Angio Panel/Angio Analysis Inputs 20230927.xlsx"
+angio_thresholds <- read_excel(angio_threshold_file)
+marker_order <- c("PanCK", "CD31", "VEGFR", "ERG", "PODO447", "VEGFA")
+
+angio_thresholds_non_erg <- angio_thresholds %>%
+  filter(!str_detect(`HALO Export Folder`, "ERG1")) %>%
+  mutate(tma = str_extract(`HALO Export Folder`, "[0-9]{2}\\-[0-9]{3}[A-Z]?")) %>%
+  mutate(inputs = strsplit(`Analysis Inputs`, ";")) %>%
+  rowwise() %>%
+  mutate(weak_intensities = list(inputs[str_detect(inputs, "weak")] %>% str_extract("[0-9\\.]+") %>% as.numeric),
+         moderate_intensities = list(inputs[str_detect(inputs, "moderate")] %>% str_extract("[0-9\\.]+") %>% as.numeric),
+         strong_intensities = list(inputs[str_detect(inputs, "strong")] %>% str_extract("[0-9\\.]+") %>% as.numeric)) %>%
+  mutate(marker_order = list(marker_order)) %>%
+  select(tma, marker_order, weak_intensities, moderate_intensities, strong_intensities)
+
+non_erg_thresholds <- angio_thresholds_non_erg %>% unnest_longer(col = c(marker_order, weak_intensities, moderate_intensities, strong_intensities))
+
+non_erg_thresholds %>% 
+  rename(marker=marker_order) %>%
+  filter(marker %in% c("VEGFA", "VEGFR", "PODO447")) %>%
+  arrange(marker, tma)
+```
+
+So VEGFR has generally higher thresholds for 22-004A/B than 10-005 and 10-006, which is reasonable. VEGFA is all over the map. PODO447 has the same thresholds in all arrays.  
+
+```{r}
+hscore_multipliers <- non_erg_thresholds %>% 
+  mutate(
+    marker_order = dplyr::recode(marker_order,
+                                 "PODO447"="PODO")
+  ) %>%
+  filter(marker_order %in% c("PODO", "VEGFR")) %>%
+  mutate(strong_intensities = strong_intensities/weak_intensities,
+         moderate_intensities = moderate_intensities/weak_intensities,
+         weak_intensities = 1) %>%
+  group_by(marker_order) %>%
+  summarise(Weak = mean(weak_intensities),
+            Moderate = mean(moderate_intensities),
+            Strong = mean(strong_intensities)) %>%
+  ungroup() %>%
+  gather(key = "strength",
+         value = "multiplier", 
+         -marker_order) %>%
+  rename(marker = marker_order)
+
+hscore_multipliers %>%
+  arrange(marker, strength)
+```
+
+
+### Area percentages
+
+
+```{r}
+non_erg_data_areas_filtered <- non_erg_data_areas_long %>% 
+  filter(!str_detect(variable, "VEGFA"))
+
+general_area_variables <- c("Classified Area (mm²)", "Glass Area (mm²)", "Other Area (mm²)",
+                         "Stroma Area (mm²)", "Tumour Area (mm²)", "Vessel Area (mm²)")
+
+non_erg_general_areas <- non_erg_data_areas_filtered %>%
+  filter(variable %in% general_area_variables) %>%
+  mutate(parent_area=str_extract(variable, "^(Tumour|Stroma|Vessel)"))
+
+non_erg_specific_areas <- non_erg_data_areas_filtered %>% 
+  filter(!variable %in% general_area_variables) %>%
+  mutate(parent_area=str_extract(variable, "^(Tumour|Stroma|Vessel)")) %>%
+  left_join(
+    non_erg_general_areas %>%
+      select(tma, acc_num, row, col, parent_area, value) %>%
+      filter(!is.na(parent_area)) %>%
+      rename(parent_value=value)
+  ) %>%
+  rename(area=variable)
+
+# frac_value: Fractional area within parent region
+non_erg_specific_areas <- non_erg_specific_areas %>%
+  mutate(frac_value=value/parent_value,
+         area=str_replace(area, " Area \\(mm²\\)", ""))
+```
+
+```{r, fig.width = 7, fig.height = 7}
+ggplot(non_erg_specific_areas, aes(x=frac_value, fill=tma)) + 
+  geom_density(alpha = 0.3) + 
+  facet_wrap(~ area) + 
+  theme_pubr() + 
+  scale_x_log10() + 
+  xlab("Fraction of parent area")
+```
+
+These seem reasonable, without very obvious batch effects. 
+
+```{r}
+# Filter out columns that are just a sum of other columns
+non_erg_specific_areas_nonredundant <- non_erg_specific_areas %>%
+  filter(str_detect(area, "(\\+|Weak|Moderate|Strong)"))
+
+# Aggregate across cores from same sample
+non_erg_specific_areas_nonredundant <- non_erg_specific_areas_nonredundant %>%
+  group_by(acc_num, area, parent_area) %>%
+  summarise(frac_value=sum(value)/sum(parent_value)) %>%
+  ungroup()
+
+# Get 'H-score' measurements
+non_erg_hscores <- non_erg_specific_areas_nonredundant %>%
+  mutate(marker=str_extract(area, "(?<=[A-Za-z]{1,15}\\: )[A-Z]*"),
+         strength=str_extract(area, "(Weak|Moderate|Strong)")) %>%
+  filter(!is.na(strength)) %>%
+  left_join(hscore_multipliers) %>%
+  group_by(acc_num, parent_area, marker) %>%
+  summarise(frac_value=sum(frac_value * multiplier)) %>%
+  ungroup() %>%
+  mutate(area = paste0(parent_area, ": ", marker, " H-score")) %>%
+  select(-c(marker))
+
+non_erg_specific_areas_nonredundant <- non_erg_specific_areas_nonredundant %>%
+  bind_rows(non_erg_hscores)
+
+non_erg_specific_areas_nonredundant_wide <- non_erg_specific_areas_nonredundant %>%
+  select(-c(parent_area)) %>%
+  spread(key = area, value = frac_value)
+```
+
+```{r}
+non_erg_specific_areas_nonredundant_matrix <- non_erg_specific_areas_nonredundant_wide %>%
+  column_to_rownames("acc_num")
+
+col_annos <- data.frame(
+  name=colnames(non_erg_specific_areas_nonredundant_matrix)
+) %>%
+  mutate(region=str_extract(name, "^[A-Za-z]+")) %>%
+  column_to_rownames("name")
+
+ca <- columnAnnotation(df = col_annos)
+
+# arcsin sqrt transformation
+area_heatmap <- Heatmap(non_erg_specific_areas_nonredundant_matrix,
+                        na_col = "gray",
+                        column_names_gp = gpar(fontsize = 6), 
+                        cluster_rows = TRUE,
+                        cluster_columns = TRUE,
+                        clustering_method_rows = "ward.D2",
+                        column_names_rot = 80, 
+                        show_row_names = FALSE,
+                        top_annotation = ca)
+```
+
+```{r}
+draw(area_heatmap, heatmap_legend_side = "right")
+```
+
+
+
+```{r}
+area_heatmap_VEGFR <- Heatmap(non_erg_specific_areas_nonredundant_matrix[,!str_detect(colnames(non_erg_specific_areas_nonredundant_matrix), "PODO")] %>% scale,
+                        na_col = "gray",
+                        column_names_gp = gpar(fontsize = 6), 
+                        cluster_rows = TRUE,
+                        cluster_columns = TRUE,
+                        clustering_method_rows = "ward.D2",
+                        column_names_rot = 80, 
+                        show_row_names = FALSE)
+
+draw(area_heatmap_VEGFR, heatmap_legend_side = "right")
+```
+
+```{r}
+area_heatmap_PODO <- Heatmap(non_erg_specific_areas_nonredundant_matrix[,!str_detect(colnames(non_erg_specific_areas_nonredundant_matrix), "VEGFR")] %>% scale,
+                        na_col = "gray",
+                        column_names_gp = gpar(fontsize = 6), 
+                        cluster_rows = TRUE,
+                        cluster_columns = TRUE,
+                        clustering_method_rows = "ward.D2",
+                        column_names_rot = 80, 
+                        show_row_names = FALSE)
+
+draw(area_heatmap_PODO, heatmap_legend_side = "right")
+```
+
+Tumour and vascular podocalyxin expression seem fairly independent of one another; and stromal expression of podocalyxin is minimal. Given the high level of correlation between weak/moderate/strong within each of the classes, they can probably be combined into overall PODO positivity at any level. 
+
+```{r}
+podo_region_summary <- non_erg_specific_areas_nonredundant_wide %>%
+  mutate(`Tumour: PODO` = `Tumour: PODO Weak` + `Tumour: PODO Moderate` + `Tumour: PODO Strong`,
+         `Stroma: PODO` = `Stroma: PODO Weak` + `Stroma: PODO Moderate` + `Stroma: PODO Strong`,
+         `Vessel: PODO` = `Vessel: PODO Weak` + `Vessel: PODO Moderate` + `Vessel: PODO Strong`) %>%
+  select(acc_num, `Tumour: PODO`, `Stroma: PODO`, `Vessel: PODO`, `Tumour: PODO H-score`, `Stroma: PODO H-score`, `Vessel: PODO H-score`)
+
+vegfr_region_summary <- non_erg_specific_areas_nonredundant_wide %>%
+  mutate(`Tumour: VEGFR` = `Tumour: VEGFR Weak` + `Tumour: VEGFR Moderate` + `Tumour: VEGFR Strong`,
+         `Stroma: VEGFR` = `Stroma: VEGFR Weak` + `Stroma: VEGFR Moderate` + `Stroma: VEGFR Strong`,
+         `Vessel: VEGFR` = `Vessel: VEGFR Weak` + `Vessel: VEGFR Moderate` + `Vessel: VEGFR Strong`) %>%
+  select(acc_num, `Tumour: VEGFR`, `Stroma: VEGFR`, `Vessel: VEGFR`, `Tumour: VEGFR H-score`, `Stroma: VEGFR H-score`, `Vessel: VEGFR H-score`)
+```
+
+# Correlation with clinical data
+
+```{r}
+# Read in clinical data
+clinical_data_file <- "../bc-1508_tma_clin_data_2023-08-07.xlsx"
+
+clinical_data <- read_excel(clinical_data_file, sheet = "bc-1508", na = c("", "NA", "n/a", "Unk"))
+
+# Clinical data table contains some invisible characters
+clinical_data <- clinical_data %>%
+  mutate(acc_num=replace_non_ascii(acc_num),
+         study_id=replace_non_ascii(study_id)) %>%
+  ## Remove leading zeros after hyphens, these are inconsistently formatted in both tables :(
+  mutate(acc_num=str_replace(acc_num, "-(0+)", "-")) %>%
+  mutate(age_dx=as.numeric(age_dx),
+         age_surg=as.numeric(age_surg),
+         tx=str_replace(tx, " only", "")) %>%
+  mutate(
+    chemo = grepl("chemo", tx),
+    rt = grepl("RT", tx),
+    brachy = grepl("brachy", tx)
+  ) %>%
+  mutate(
+    ## Temporary solution, of no relevance as p53abn is the focus anyways
+    eclass2_ngs=dplyr::recode(eclass2_ngs, "discrepant: MMRd, NSMP/p53wt"="NSMP/p53wt"),
+    eclass2_pt=dplyr::recode(eclass2_pt, "discrepant: MMRd, NSMP/p53wt"="NSMP/p53wt")
+  )
+
+group_by_cols <- setdiff(colnames(clinical_data), c("tma", "core_id"))
+
+clinical_data_unique <- clinical_data %>% 
+  group_by_at(group_by_cols) %>%
+  summarise(across(everything(), ~ paste(., collapse = ","))) %>%
+  ungroup()
+```
+
+```{r}
+vegfr_podo_clinical <- clinical_data_unique %>%
+  inner_join(podo_region_summary) %>%
+  inner_join(vegfr_region_summary)
+```
+
+```{r}
+vegfr_podo_clinical_long <- vegfr_podo_clinical %>%
+  pivot_longer(
+    cols = c(starts_with("os"), starts_with("pfs"), starts_with("dss")),
+    names_to = c("outcome", ".value"),
+    names_sep = "_"
+  ) %>%
+  mutate(sts = str_extract(sts, "(?<=\\.).*"),
+         yrs = as.numeric(yrs),
+         sts = (sts == "event")) %>%
+  filter(!is.na(yrs)) %>%
+  rename(time=yrs,
+         status=sts) %>%
+  ## time == 0 not allowed in cox model
+  filter(time > 0)
+```
+
+```{r}
+outcomes <- vegfr_podo_clinical_long$outcome %>% unique
+
+fit_data <- lapply(outcomes, function(x) {
+  vegfr_podo_clinical_long %>% 
+    filter(outcome == x,
+           eclass2_ngs == "p53abn") %>%
+    mutate(stage_main=str_extract(stage_full, "I*V*")) %>%
+    filter(!is.na(eclass2_ngs),
+           !is.na(stage_main),
+           !is.na(age_dx))
+})
+names(fit_data) <- outcomes
+
+podo_fits <- lapply(outcomes, function(x) {
+  cox_fit <- coxph(Surv(time, status) ~ `Tumour: PODO H-score` + `Vessel: PODO H-score` + `Stroma: PODO H-score` + age_dx + chemo + rt + brachy + stage_main,
+                   data = fit_data[[x]])
+})
+names(podo_fits) <- outcomes
+
+lapply(podo_fits, summary)
+```
+
+No significant association between PODO and os/pfs/dss regardless of whether or not p53abn is analyzed alone, or the entire cohort with eclass2_ngs as a covariate. 
+
+```{r}
+vegfr_fits <- lapply(outcomes, function(x) {
+  cox_fit <- coxph(Surv(time, status) ~ `Tumour: VEGFR H-score` + `Vessel: VEGFR H-score` + `Stroma: VEGFR H-score` + age_dx + chemo + rt + brachy + stage_main,
+                   data = fit_data[[x]])
+})
+names(vegfr_fits) <- outcomes
+
+lapply(vegfr_fits, summary)
+```
+
+# Correlation with TIL densities
+
+```{r}
+# Read in TIL clusters and TIL densities
+til_densities_output_file <- "../results/til_densities_output.tsv"
+
+# NB clusters
+outcome_clusters_long_file <- "../results/outcome_clusters_long.tsv"
+
+til_densities_output <- read_tsv(til_densities_output_file)
+outcome_clusters_long <- read_tsv(outcome_clusters_long_file)
+```
+
+
+```{r}
+til_densities_wide <- til_densities_output %>%
+  select(-c(area)) %>%
+  # Transform densities for later
+  mutate(density = log(density + 1)) %>%
+  spread(variable, density) 
+
+til_densities_angio_wide <- non_erg_specific_areas_nonredundant %>%
+  # Angular transformation (arcsin sqrt)
+  mutate(frac_value=asin(sqrt(frac_value))) %>%
+  select(-c(parent_area)) %>%
+  spread(key = area, value = frac_value) %>%
+  inner_join(til_densities_wide)
+```
+
+```{r}
+non_erg_tsv_areas <- non_erg_general_areas %>%
+  select(-c(parent_area)) %>%
+  group_by(acc_num, variable) %>%
+  summarise(area=sum(value)) %>%
+  ungroup() %>%
+  filter(variable %in% c("Stroma Area (mm²)", "Tumour Area (mm²)", "Vessel Area (mm²)"))
+  
+# T + S + V areas
+non_erg_denom_areas <- non_erg_tsv_areas %>% 
+  group_by(acc_num) %>%
+  summarise(total_area=sum(area)) %>%
+  ungroup()
+
+non_erg_tsv_areas <- non_erg_tsv_areas %>%
+  inner_join(non_erg_denom_areas) %>%
+  mutate(frac_area=area/total_area)
+```
+
+```{r}
+ggplot(non_erg_tsv_areas, aes(x=frac_area)) + 
+  geom_histogram(bins = 50) + 
+  theme_pubr() + 
+  xlab("Area/(Vessel + Tumour + Stroma)") + 
+  facet_wrap(~ variable, scales = "free_y", ncol = 1)
+```
+
+
+## Heatmap
+
+```{r}
+til_densities_angio_matrix <- til_densities_angio_wide %>%
+  column_to_rownames("acc_num")
+
+row_annos_full <- outcome_clusters_long %>%
+  filter(outcome == "os") %>%
+  select(acc_num, clust) %>%
+  mutate(clust = factor(clust)) %>%
+  full_join(non_erg_tsv_areas %>% filter(variable == "Vessel Area (mm²)")) %>%
+  column_to_rownames("acc_num")
+
+row_annos <- row_annos_full[rownames(til_densities_angio_matrix),,drop=FALSE]
+rownames(row_annos) <- rownames(til_densities_angio_matrix)
+
+clust_color_map <- c('0'='#60B2E5',
+                     '1'='#A4031F')
+
+ra <- rowAnnotation(df = row_annos,
+                    col = list(clust = clust_color_map))
+
+
+
+til_angio_heatmap <- Heatmap(scale(til_densities_angio_matrix),
+                             na_col = "gray",
+                             column_names_gp = gpar(fontsize = 6), 
+                             cluster_rows = TRUE,
+                             cluster_columns = TRUE,
+                             column_names_rot = 80, 
+                             show_row_names = FALSE,
+                             row_split = row_annos$clust) + ra
+
+draw(til_angio_heatmap, heatmap_legend_side = "right")
+```
+
+There's no clear relationship between PODO and VEGFR anywhere and TIL densities. 
+
+```{r, fig.width = 7, fig.height = 4}
+clust_tsv_areas <- outcome_clusters_long %>%
+  filter(outcome == "os") %>%
+  select(acc_num, clust) %>%
+  mutate(clust = factor(clust)) %>%
+  inner_join(non_erg_tsv_areas)
+
+ggplot(clust_tsv_areas %>% filter(!is.na(clust)), aes(x=clust, y=frac_area)) + 
+  geom_boxplot(outlier.size = -1, width = 0.3) + 
+  geom_point(alpha = 0.3, position = position_jitter(width = 0.05, height = 0)) +
+  stat_compare_means(vjust = 0.7, size = 4) +
+  theme_pubr() + 
+  facet_wrap(~ variable, scales = "free_y") + 
+  xlab("TIL cluster") + 
+  ylab("Area/(Vessel + Tumour + Stroma)")
+```
+
+Vessel area is significantly associated with TIL cluster, but as above, there's no clear relationship between the expression of any of the other markers we looked at in the angiogenesis panel and TILs. 
+
+```{r, fig.width = 12, fig.height = 8}
+specific_areas_clust <- non_erg_specific_areas_nonredundant %>%
+  inner_join(row_annos_full %>%
+               select(clust, variable, frac_area) %>%
+               rename(frac_vessel_area=frac_area) %>%
+               rownames_to_column("acc_num")) 
+
+ggplot(specific_areas_clust %>% filter(!is.na(clust)), aes(x=clust, y=frac_value)) + 
+  geom_boxplot(outlier.size = -1, width = 0.3) + 
+  geom_point(alpha = 0.3, position = position_jitter(width = 0.05, height = 0)) +
+  facet_wrap(~ area, scales = "free_y") + 
+  stat_compare_means(vjust = 0.7, size = 4) +
+  theme_pubr() + 
+  xlab("TIL cluster") + 
+  ylab("Area")
+```
+
+One wonders about a correlation between PODO Moderate/Strong and TIL cluster. 
+
+
+# Tregs and angiogenesis 
+
+One wonders about T-regulatory cells versus angiogenesis; in that angiogenesis could recruit T-regs which dampen the immune response.
+
+As per the heatmaps above, T-regs are highly correlated with other TIL subsets and as such are positively correlated with vasculature, but so are other immune subsets. 
+
+So instead, we'll compute a ratio used in the literature -- the CD8+ T cell to FOXP3+ T cell ratio -- and see how that relates to angiogenesis. As we have multipanel IHC, we can co-register CD8 and FOXP3, so this won't be exactly the same ratio used in previous papers. 
+
+
+```{r}
+cyto_treg_ratios <- til_densities_output %>%
+  select(-c(area)) %>%
+  spread(variable, density) %>%
+  # A few options here to deal with Inf and NaN entries, we'll look at how much later
+  mutate(cyto_treg_ratio_tumour=dens_tcyto_tumour/dens_treg_tumour,
+         cyto_treg_ratio_stroma=dens_tcyto_stroma/dens_treg_stroma,
+         cyto_treg_ratio_tumour_clipped=exp(log(dens_tcyto_tumour + 1) - log(dens_treg_tumour + 1)),
+         cyto_treg_ratio_stroma_clipped=exp(log(dens_tcyto_stroma + 1) - log(dens_treg_stroma + 1))) %>%
+  select(acc_num, cyto_treg_ratio_tumour, cyto_treg_ratio_stroma, cyto_treg_ratio_tumour_clipped, cyto_treg_ratio_stroma_clipped)
+```
+
+## By TIL cluster
+
+```{r}
+cyto_treg_ratios <- cyto_treg_ratios %>%
+  left_join(outcome_clusters_long %>%
+              filter(outcome == "os")) %>%
+  mutate(clust = factor(clust))
+
+cyto_treg_ratios_long <- cyto_treg_ratios %>%
+  gather(key = variable, value = ratio, -c(acc_num, clust, outcome))
+
+ggplot(cyto_treg_ratios_long %>% filter(!is.nan(ratio), !is.na(clust)), aes(x=clust, y=ratio)) +
+  geom_boxplot(outlier.size = -1, width = 0.3) + 
+  geom_point(position = position_jitter(width = 0.05), alpha = 0.3) + 
+  stat_compare_means(vjust = 0.7, size = 4) + 
+  scale_y_log10() + 
+  theme_pubr() + 
+  facet_wrap(~ variable) + 
+  xlab("TIL clust") + 
+  ylab("T cytotoxic/T reg ratio")
+```
+
+Interestingly, the cyto/Treg ratio is significantly different across clusters in the TUMOUR, but not in the STROMA, indicating that the NB model has naturally picked out samples that have high cyto/Treg ratio from those that don't. 
+
+## By angiogenesis
+
+```{r, fig.width =17, fig.height = 15}
+non_erg_specific_areas_cyto_treg_ratios <- non_erg_specific_areas_nonredundant %>%
+  select(-c(parent_area)) %>%
+  bind_rows(non_erg_tsv_areas %>%
+              filter(variable == "Vessel Area (mm²)") %>%
+              select(acc_num, frac_area) %>%
+              rename(frac_value=frac_area) %>%
+              mutate(area = "Vessel/(Vessel + Tumour + Stroma)")) %>%
+  inner_join(cyto_treg_ratios_long)
+
+non_erg_specific_areas_cyto_treg_ratios <- non_erg_specific_areas_cyto_treg_ratios %>%
+  filter(!is.nan(ratio))
+
+ggplot(non_erg_specific_areas_cyto_treg_ratios, aes(x=frac_value, y=ratio, colour = variable)) + 
+  geom_point(alpha = 0.2) + 
+  stat_smooth(method="lm", alpha = 0.4) + 
+  stat_cor(method = "spearman", cor.coef.name = "rho") +
+  theme_pubr() + 
+  facet_wrap(~ area, scales = "free") + 
+  xlab("Fraction") + 
+  ylab("Ratio") + 
+  scale_x_log10() + 
+  scale_y_log10()
+```
+
+There are no substantial correlations here with a substantial Spearman $\rho$, including when we look at vessel area. 
+
+## By survival
+
+```{r}
+cyto_treg_clinical <- clinical_data_unique %>%
+  inner_join(cyto_treg_ratios %>%
+               select(-c(outcome)))
+
+cyto_treg_clinical_long <- cyto_treg_clinical %>%
+  pivot_longer(
+    cols = c(starts_with("os"), starts_with("pfs"), starts_with("dss")),
+    names_to = c("outcome", ".value"),
+    names_sep = "_"
+  ) %>%
+  mutate(sts = str_extract(sts, "(?<=\\.).*"),
+         yrs = as.numeric(yrs),
+         sts = (sts == "event")) %>%
+  filter(!is.na(yrs)) %>%
+  rename(time=yrs,
+         status=sts) %>%
+  ## time == 0 not allowed in cox model
+  filter(time > 0)
+```
+
+```{r}
+outcomes <- cyto_treg_clinical_long$outcome %>% unique
+
+fit_data <- lapply(outcomes, function(x) {
+  cyto_treg_clinical_long %>% 
+    filter(outcome == x,
+           eclass2_ngs == "p53abn") %>%
+    mutate(stage_main=str_extract(stage_full, "I*V*")) %>%
+    filter(!is.na(eclass2_ngs),
+           !is.na(stage_main),
+           !is.na(age_dx)) %>%
+    filter(!is.infinite(cyto_treg_ratio_tumour),
+           !is.infinite(cyto_treg_ratio_stroma)) 
+})
+names(fit_data) <- outcomes
+
+cyto_treg_fits <- lapply(outcomes, function(x) {
+  cox_fit <- coxph(Surv(time, status) ~ log(cyto_treg_ratio_tumour + 1) + age_dx + chemo + rt + brachy + stage_main,
+                   data = fit_data[[x]])
+})
+names(cyto_treg_fits) <- outcomes
+
+lapply(cyto_treg_fits, summary)
+```
+
+Alone or together, cyto/Treg ratio is not correlated with survival. The coefficients are stable whether or not tumour and stroma ratios are considered individually in the model or together. 
+
+
+```{r}
+tsv_areas_clinical <- clinical_data_unique %>%
+  inner_join(non_erg_tsv_areas %>%
+               select(-c(area, total_area)) %>%
+               spread(key = variable, value = frac_area)
+             )
+
+tsv_areas_clinical_long <- tsv_areas_clinical %>%
+  pivot_longer(
+    cols = c(starts_with("os"), starts_with("pfs"), starts_with("dss")),
+    names_to = c("outcome", ".value"),
+    names_sep = "_"
+  ) %>%
+  mutate(sts = str_extract(sts, "(?<=\\.).*"),
+         yrs = as.numeric(yrs),
+         sts = (sts == "event")) %>%
+  filter(!is.na(yrs)) %>%
+  rename(time=yrs,
+         status=sts) %>%
+  ## time == 0 not allowed in cox model
+  filter(time > 0)
+
+outcomes <- tsv_areas_clinical_long$outcome %>% unique
+
+fit_data <- lapply(outcomes, function(x) {
+  tsv_areas_clinical_long %>% 
+    filter(outcome == x,
+           eclass2_ngs == "p53abn") %>%
+    mutate(stage_main=str_extract(stage_full, "I*V*")) %>%
+    filter(!is.na(eclass2_ngs),
+           !is.na(stage_main),
+           !is.na(age_dx))
+})
+names(fit_data) <- outcomes
+
+tsv_areas_fits <- lapply(outcomes, function(x) {
+  cox_fit <- coxph(Surv(time, status) ~ `Vessel Area (mm²)` + age_dx + chemo + rt + brachy + stage_main,
+                   data = fit_data[[x]])
+})
+names(tsv_areas_fits) <- outcomes
+
+lapply(tsv_areas_fits, summary)
+```
+
+
+# Outputs
+
+```{r, eval = FALSE}
+write_tsv(non_erg_data, file = "../results/non_erg_data.tsv")
+```

@@ -1,0 +1,307 @@
+---
+title: "AR analysis"
+output: 
+  html_document:
+      code_folding: hide
+      toc: true
+      toc_float: true
+---
+
+
+```{r global_chunk_options, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(readxl)
+library(ComplexHeatmap)
+library(textclean)
+library(survival)
+library(survminer)
+library(circlize)
+library(glmnet)
+library(reticulate)
+library(ggupset)
+library(ggforce)
+library(RColorBrewer)
+library(car)
+```
+
+# Data
+
+```{r}
+ar_area_file <- "../data/AR_area_labeled.tsv"
+
+ar_area_raw <- read_tsv(ar_area_file)
+```
+
+```{r}
+ar_area <- ar_area_raw %>%
+  filter(is.na(notes) | str_detect(notes, "((?i)discard|(?i)exclude)", negate = TRUE)) %>%
+  mutate(acc_num=str_replace(acc_num, "-(0+)", "-")) %>%
+  mutate(acc_num=str_replace(acc_num, " \\(.*", ""))
+
+colnames(ar_area) <- str_replace(colnames(ar_area), " \\(Opal [0-9]+\\)", "")
+```
+
+```{r}
+ar_area %>% dim
+```
+
+```{r}
+ar_area %>% colnames
+```
+
+```{r}
+area_features <- c(
+  "PanCK+ Area (μm²)",
+  "PDL1 Area (μm²)", "PDL1 Weak Area (μm²)", "PDL1 Moderate Area (μm²)", "PDL1 Strong Area (μm²)",
+  "IDO1 Area (μm²)", "IDO1 Weak Area (μm²)", "IDO1 Moderate Area (μm²)", "IDO1 Strong Area (μm²)",
+  "CD68 Area (μm²)", "CD68 Weak Area (μm²)", "CD68 Moderate Area (μm²)", "CD68 Strong Area (μm²)",
+  "CD8 Area (μm²)", "CD8 Weak Area (μm²)", "CD8 Moderate Area (μm²)", "CD8 Strong Area (μm²)",
+  "PD1 Area (μm²)", "PD1 Weak Area (μm²)", "PD1 Moderate Area (μm²)", "PD1 Strong Area (μm²)",
+  "PDL1+IDO1+CD68- Area (μm²)", "PDL1+IDO1-CD68- Area (μm²)", "PDL1-IDO1+CD68- Area (μm²)", 
+  "PDL1+IDO1-CD68+ Area (μm²)", "PDL1-IDO1+CD68+ Area (μm²)", "PDL1+IDO1+CD68+ Area (μm²)",
+  "CD8+PD1+ Area (μm²)", "CD8-PD1+ Area (μm²)", "CD8+PD1- Area (μm²)", "CD68+IDO1-PDL1- Area (μm²)", "PDL1-IDO1-CD68- Area (μm²)"
+)
+
+intensity_features <- colnames(ar_area)[str_detect(colnames(ar_area), "^(Tumour|Stroma)") & str_detect(colnames(ar_area), "Intensity")]
+```
+
+```{r}
+ar_area_selected <- ar_area %>%
+  select(c(
+    "tma", "acc_num", "sector", "row", "col", "Algorithm Name", "Classified Area (mm²)", "Glass Area (mm²)", "Other Area (mm²)",
+    "Stroma Area (mm²)", "Tumour Area (mm²)",
+    apply(expand.grid(c("Tumour", "Stroma"), area_features), 1, paste, collapse=": "),
+    intensity_features
+  )) %>%
+  rename(algorithm=`Algorithm Name`)
+```
+
+```{r}
+## Summarize the areas first, as those only require summation
+ar_areas_long <- ar_area_selected %>%
+  gather(variable, value, -c("tma", "acc_num", "sector", "row", "col", "algorithm")) %>%
+  filter(str_detect(variable, "Area")) %>%
+  mutate(value = replace_na(value, 0)) %>%
+  ## Homogenize area units
+  mutate(value = ifelse(str_detect(variable, "μm²"), value/10^6, value)) %>%
+  mutate(variable = str_replace_all(variable, "μm²", "mm²"))
+
+ar_areas_summarized_long <- ar_areas_long %>%
+  group_by(tma, acc_num, algorithm, variable) %>%
+  summarise(value=sum(value)) %>%
+  ungroup()
+
+
+## Get intensity variables
+ar_intensities <- ar_area_selected %>% 
+  gather(variable, value, -c("tma", "acc_num", "sector", "row", "col", "algorithm")) %>%
+  filter(str_detect(variable, "Intensity")) %>%
+  mutate(value = replace_na(value, 0)) %>%
+  rename(intensity=value)
+
+## Parse corresponding area string
+ar_intensities <- ar_intensities %>%
+  mutate(corresponding_area=str_replace(trimws(str_replace(variable, "[a-zA-Z0-9\\+\\-]+ Average (Positive )?Intensity", "")), "\\:$", "")) %>%
+  mutate(corresponding_area = paste0(corresponding_area, " Area (mm²)"))
+
+ar_intensities_areas <- ar_intensities %>%
+  left_join(ar_areas_long %>%
+              rename(corresponding_area=variable, area=value))
+
+## Summarize over cores for the same tma and acc_num
+ar_average_intensities_by_tma_sample <- ar_intensities_areas %>%
+  group_by(tma, acc_num, variable, corresponding_area) %>%
+  summarise(intensity=sum(intensity*area)/sum(area),
+            area=sum(area)) %>%
+  ungroup()
+
+ar_average_intensities_by_sample <- ar_intensities_areas %>%
+  group_by(acc_num, variable, corresponding_area) %>%
+  summarise(intensity=sum(intensity*area)/sum(area),
+            area=sum(area)) %>%
+  ungroup()
+```
+
+## TMA/Sample heatmap
+
+```{r}
+ar_average_intensities_by_tma_sample_wide <- ar_average_intensities_by_tma_sample %>%
+  select(-c(corresponding_area, area)) %>%
+  spread(key = variable, value = intensity) %>%
+  mutate(unique_id=paste0(tma, "_", acc_num)) %>%
+  select(-c(tma, acc_num)) %>%
+  select(unique_id, everything())
+
+ar_average_intensities_by_tma_sample_matrix <- ar_average_intensities_by_tma_sample_wide %>%
+  column_to_rownames("unique_id") %>% 
+  scale
+
+ar_average_intensities_by_tma_sample_matrix_filtered <- ar_average_intensities_by_tma_sample_matrix[rowSums(is.na(ar_average_intensities_by_tma_sample_matrix)) != ncol(ar_average_intensities_by_tma_sample_matrix),]
+
+ar_average_intensities_by_tma_sample_matrix_filtered <- ar_average_intensities_by_tma_sample_matrix_filtered[,colSums(is.na(ar_average_intensities_by_tma_sample_matrix_filtered)) != nrow(ar_average_intensities_by_tma_sample_matrix_filtered)]
+  
+row_annos <- data.frame(
+  unique_id=rownames(ar_average_intensities_by_tma_sample_matrix_filtered)
+) %>%
+  mutate(tma=str_extract(unique_id, "^[0-9]{2}\\-[0-9]{3}([A-Z])?")) %>%
+  column_to_rownames("unique_id")
+
+col_annos <- data.frame(
+  name=colnames(ar_average_intensities_by_tma_sample_matrix_filtered)
+) %>%
+  mutate(region=str_extract(name, "^[A-Za-z]+")) %>%
+  column_to_rownames("name")
+
+ra <- rowAnnotation(df = row_annos)
+ca <- columnAnnotation(df = col_annos)
+
+
+ar_intensity_heatmap <- Heatmap(scale(ar_average_intensities_by_tma_sample_matrix_filtered),
+                                na_col = "gray",
+                                column_names_gp = gpar(fontsize = 6), 
+                                cluster_rows = TRUE,
+                                cluster_columns = TRUE,
+                                column_names_rot = 80, 
+                                show_row_names = FALSE) + ra
+
+
+draw(ar_intensity_heatmap, heatmap_legend_side = "right")
+```
+
+So there are significant batch effects here, but hopefully the thresholded data is good. 
+
+## Areas
+
+```{r}
+general_area_variables <- c("Classified Area (mm²)", "Glass Area (mm²)", "Other Area (mm²)",
+                         "Stroma Area (mm²)", "Tumour Area (mm²)")
+
+ar_general_areas <- ar_areas_long %>%
+  filter(variable %in% general_area_variables) %>%
+  mutate(parent_area=str_extract(variable, "^(Tumour|Stroma)"))
+
+ar_specific_areas <- ar_areas_long %>% 
+  filter(!variable %in% general_area_variables) %>%
+  mutate(parent_area=str_extract(variable, "^(Tumour|Stroma)")) %>%
+  left_join(
+    ar_general_areas %>%
+      select(tma, acc_num, sector, row, col, parent_area, value) %>%
+      filter(!is.na(parent_area)) %>%
+      rename(parent_value=value)
+  ) %>%
+  rename(area=variable)
+
+# frac_value: Fractional area within parent region
+ar_specific_areas <- ar_specific_areas %>%
+  mutate(frac_value=value/parent_value,
+         area=str_replace(area, " Area \\(mm²\\)", ""))
+```
+
+
+```{r, fig.width = 10, fig.height = 8}
+ggplot(ar_specific_areas, aes(x=frac_value, fill=tma)) + 
+  geom_density(alpha = 0.3) + 
+  facet_wrap(~ area, scales = "free") + 
+  theme_pubr() + 
+  scale_x_log10() + 
+  xlab("Fraction of parent area")
+```
+
+Those look reasonable. 
+
+## Functional areas (i.e. non-phenotyped areas)
+
+```{r}
+# Get the ACTUAL biological columns of interest
+ar_specific_areas_functional <- ar_areas_long %>%
+  mutate(area=trimws(str_replace(variable, " Area \\(mm²\\)", ""))) %>%
+  select(-c(variable)) %>%
+  group_by(acc_num) %>%
+  summarise(
+    # CD68+ cells
+    `Tumour: CD68+ PDL1+IDO1+`=sum(value[area == "Tumour: PDL1+IDO1+CD68+"])/sum(value[area == "Tumour: CD68"]),
+    `Tumour: CD68+ PDL1-IDO1+`=sum(value[area == "Tumour: PDL1-IDO1+CD68+"])/sum(value[area == "Tumour: CD68"]),
+    `Tumour: CD68+ PDL1+IDO1-`=sum(value[area == "Tumour: PDL1+IDO1-CD68+"])/sum(value[area == "Tumour: CD68"]),
+    `Tumour: CD68+ PDL1-IDO1-`=sum(value[area == "Tumour: CD68+IDO1-PDL1-"])/sum(value[area == "Tumour: CD68"]),
+    `Stroma: CD68+ PDL1+IDO1+`=sum(value[area == "Stroma: PDL1+IDO1+CD68+"])/sum(value[area == "Stroma: CD68"]),
+    `Stroma: CD68+ PDL1-IDO1+`=sum(value[area == "Stroma: PDL1-IDO1+CD68+"])/sum(value[area == "Stroma: CD68"]),
+    `Stroma: CD68+ PDL1+IDO1-`=sum(value[area == "Stroma: PDL1+IDO1-CD68+"])/sum(value[area == "Stroma: CD68"]),
+    `Stroma: CD68+ PDL1-IDO1-`=sum(value[area == "Stroma: CD68+IDO1-PDL1-"])/sum(value[area == "Stroma: CD68"]),
+    # CD8+ cells not possible to do
+    # Tumour cells
+    `Tumour: CD68- PDL1+IDO1+`=sum(value[area == "Tumour: PDL1+IDO1+CD68-"])/sum(value[area == "Tumour"] - value[area == "Tumour: CD68"]),
+    `Tumour: CD68- PDL1-IDO1+`=sum(value[area == "Tumour: PDL1-IDO1+CD68-"])/sum(value[area == "Tumour"] - value[area == "Tumour: CD68"]),
+    `Tumour: CD68- PDL1+IDO1-`=sum(value[area == "Tumour: PDL1+IDO1-CD68-"])/sum(value[area == "Tumour"] - value[area == "Tumour: CD68"]),
+    `Tumour: CD68- PDL1-IDO1-`=sum(value[area == "Tumour: PDL1-IDO1-CD68-"])/sum(value[area == "Tumour"] - value[area == "Tumour: CD68"]),
+    # Stromal cells
+    `Stroma: CD68- PDL1+IDO1+`=sum(value[area == "Stroma: PDL1+IDO1+CD68-"])/sum(value[area == "Stroma"] - value[area == "Stroma: CD68"]),
+    `Stroma: CD68- PDL1-IDO1+`=sum(value[area == "Stroma: PDL1-IDO1+CD68-"])/sum(value[area == "Stroma"] - value[area == "Stroma: CD68"]),
+    `Stroma: CD68- PDL1+IDO1-`=sum(value[area == "Stroma: PDL1+IDO1-CD68-"])/sum(value[area == "Stroma"] - value[area == "Stroma: CD68"]),
+    `Stroma: CD68- PDL1-IDO1-`=sum(value[area == "Stroma: PDL1-IDO1-CD68-"])/sum(value[area == "Stroma"] - value[area == "Stroma: CD68"]),
+  ) %>%
+  ungroup()
+
+# ar_specific_areas_functional <- ar_specific_areas_functional %>%
+#   mutate(unique_id = paste0(tma, "_", acc_num)) %>%
+#   select(-c(tma, acc_num)) %>%
+#   select(unique_id, everything())
+```
+
+```{r}
+# Read in TIL clusters and TIL densities
+til_densities_output_file <- "../results/til_densities_output.tsv"
+
+# NB clusters
+outcome_clusters_long_file <- "../results/outcome_clusters_long.tsv"
+
+til_densities_output <- read_tsv(til_densities_output_file)
+outcome_clusters_long <- read_tsv(outcome_clusters_long_file)
+```
+
+```{r}
+ar_specific_areas_functional_matrix <- ar_specific_areas_functional %>%
+  column_to_rownames("acc_num")
+  
+row_annos <- outcome_clusters_long %>%
+  filter(outcome == "os") %>%
+  select(acc_num, clust) %>%
+  mutate(clust = factor(clust)) %>%
+  column_to_rownames("acc_num")
+
+row_annos <- row_annos[rownames(ar_specific_areas_functional_matrix),,drop=FALSE]
+rownames(row_annos) <- rownames(ar_specific_areas_functional_matrix)
+
+col_annos <- data.frame(
+  name=colnames(ar_specific_areas_functional_matrix)
+) %>%
+  mutate(region=str_extract(name, "^[A-Za-z]+"),
+         parent_celltype=str_extract(name, "CD68[\\+\\-]")) %>%
+  column_to_rownames("name")
+
+clust_color_map <- c('0'='#60B2E5',
+                     '1'='#A4031F')
+
+ra <- rowAnnotation(df = row_annos,
+                    col = list(clust = clust_color_map))
+ca <- columnAnnotation(df = col_annos)
+
+
+ar_functional_heatmap <- Heatmap(ar_specific_areas_functional_matrix %>% scale,
+                                na_col = "gray",
+                                column_names_gp = gpar(fontsize = 6), 
+                                cluster_rows = TRUE,
+                                cluster_columns = TRUE,
+                                column_names_rot = 80, 
+                                show_row_names = FALSE,
+                                top_annotation = ca, 
+                                row_split = row_annos$clust) + ra
+
+
+draw(ar_functional_heatmap, heatmap_legend_side = "right")
+```
+
+I plotted the above with TMA as a stratifying variable too, and the batch effects appear to be insignificant. 
