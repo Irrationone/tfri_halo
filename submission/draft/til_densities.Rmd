@@ -1,0 +1,334 @@
+---
+title: "TIL density analysis"
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
+date: "2024-01-03"
+---
+
+```{r global_chunk_options, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+
+here::i_am("submission/draft/til_densities.Rmd")
+```
+
+```{r, echo = TRUE}
+library(tidyverse)
+library(readxl)
+library(ComplexHeatmap)
+library(textclean)
+library(survival)
+library(survminer)
+library(circlize)
+library(glmnet)
+library(reticulate)
+library(ggupset)
+library(ggforce)
+library(RColorBrewer)
+library(car)
+library(here)
+```
+
+# Input data
+
+## Paths
+
+```{r}
+# Clinical
+clinical_data_path <- here::here("data", "processed", "clinical_data.tsv")
+
+# B & T 
+bt_data_path <- here::here("data", "processed", "bt_labeled.tsv")
+
+# Adaptive resistance 
+ar_pheno_data_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
+```
+
+
+```{r}
+clinical <- read_tsv(clinical_data_path)
+
+bt <- read_tsv(bt_data_path)
+
+ar_pheno <- read_tsv(ar_pheno_data_path)
+```
+
+```{r}
+# Remove redundant or useless columns
+bt <- bt %>%
+  select(-c(notes, area_tumour_pct, area_stroma_pct, area_tissue_mm, block)) %>%
+  # Remove density columns
+  select(-colnames(bt)[str_detect(colnames(bt), "^dens")])
+
+ar_pheno <- ar_pheno %>%
+  select(-c(block)) 
+
+# Remove rows with no entries
+bt_clean <- bt[complete.cases(bt),]
+ar_pheno_clean <- ar_pheno[complete.cases(ar_pheno),]
+```
+
+
+## Master count table
+
+```{r}
+bt_long <- bt_clean %>%
+  # Pivot on count columns
+  pivot_longer(cols = all_of(colnames(bt_clean)[str_detect(colnames(bt_clean), "^(count)")]), 
+               names_to = "variable", 
+               values_to = "value") %>%
+  mutate(
+    panel = "B&T",
+    row = as.character(row),
+    col = as.character(col)
+  )
+
+ar_pheno_long <- ar_pheno_clean %>%
+  # Pivot on the count columns
+  pivot_longer(cols = all_of(colnames(ar_pheno_clean)[str_detect(colnames(ar_pheno_clean), "^(count)")]), 
+               names_to = "variable", 
+               values_to = "value") %>%
+  mutate(
+    panel = "AR",
+    row = as.character(row),
+    col = as.character(col)
+  )
+```
+
+```{r}
+counts_long <- bt_long %>%
+  bind_rows(ar_pheno_long)
+
+counts_long <- counts_long %>%
+  mutate(area_region_mm=ifelse(str_detect(variable, "tumour"),
+                               area_tumour_mm,
+                               area_stroma_mm),
+         region=str_extract(variable, "(tumour|stroma)$"),
+         variable=str_replace(variable, "^count_", ""),
+         variable=str_replace(variable, "_(tumour|stroma)$", ""))
+```
+
+Summarize counts by accession number (i.e. merge together rows that correspond to the same accession number, TMA, region, and variable).
+
+```{r}
+counts_summarized <- counts_long %>%
+  group_by(tma, acc_num, panel, variable, region) %>%
+  summarise(
+    value = sum(value),
+    area_region_mm = sum(area_region_mm)
+  ) %>%
+  ungroup()
+
+counts_summarized <- counts_summarized %>%
+  mutate(
+    density = value/area_region_mm
+  )
+```
+
+## Count distributions
+
+```{r, fig.width = 6, fig.height = 24}
+count_distributions <- counts_summarized %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  scale_x_continuous(trans = 'log1p', breaks = c(0, 1, 10, 100, 1000, 10000),
+                     labels = c("0", "1", "10", "100", "1000", "10000")) + 
+  facet_grid(variable ~ region, scales = "free") +
+  labs(title = "Variables") + 
+  theme_pubr() + 
+  ggtitle("Counts")
+
+count_distributions
+```
+
+## Density distributions
+
+```{r, fig.width = 6, fig.height = 24}
+density_distributions <- counts_summarized %>%
+  ggplot(aes(x = density)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  scale_x_continuous(trans = 'log1p', breaks = c(0, 1, 10, 100, 1000, 10000),
+                     labels = c("0", "1", "10", "100", "1000", "10000")) + 
+  facet_grid(variable ~ region, scales = "free") +
+  labs(title = "Variables") + 
+  theme_pubr() + 
+  ggtitle("Densities")
+
+density_distributions
+```
+
+### AR vs. B&T estimates of CD8 T cells
+
+Note that this excludes possible CD3-CD8+PD1+/- subsets, which are not quantified. In order to substitute one for the other, we expect at least a strong correlation here. 
+
+```{r}
+ar_tcyto_total <- counts_summarized %>% 
+  filter(panel == "AR",
+         variable %in% c("tcyto_pd1pos", "tcyto_pd1neg")) %>%
+  group_by(tma, acc_num, panel, region) %>%
+  summarise(
+    value=sum(value),
+    area_region_mm=sum(area_region_mm)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    density=value/area_region_mm
+  )
+
+bt_tcyto <- counts_summarized %>%
+  filter(panel == "B&T",
+         variable == "tcyto") %>%
+  select(colnames(ar_tcyto_total))
+
+tcyto_merged <- ar_tcyto_total %>%
+  rename(area_ar=area_region_mm, density_ar = density, value_ar = value) %>%
+  select(-c(panel)) %>%
+  inner_join(
+    bt_tcyto %>%
+      rename(area_bt=area_region_mm, density_bt = density, value_bt = value) %>%
+      select(-c(panel))
+  )
+```
+
+```{r}
+ggplot(tcyto_merged, aes(x=density_bt, y=density_ar)) + 
+  geom_point(alpha = 0.3) + 
+  theme_pubr() + 
+  xlab("CD8+ T density (B&T)") + 
+  ylab("CD8+PD1+ plus CD8+PD1- density (AR)") + 
+  scale_x_log10() + 
+  scale_y_log10() + 
+  stat_cor(method = "pearson")
+```
+
+The correlation is high. A caveat is that the absolute counts on the y-axis are lower, likely due to differences in the algorithms used on the different panels, or experimental parameters. 
+
+
+## Hierarchical clustering
+
+```{r}
+densities <- counts_summarized %>%
+  mutate(log_density = log1p(density),
+         variable_full = paste0(variable, "_", region))
+
+densities_wide <- densities %>%
+  select(-c(value, area_region_mm, density, panel, variable, region)) %>%
+  pivot_wider(names_from = variable_full, values_from = log_density)
+
+density_input <- densities_wide %>% 
+  select(-c(tma, acc_num)) %>% 
+  as.matrix
+rownames(density_input) <- with(densities_wide, paste0(str_replace(tma, "[AB]$", ""), "_", acc_num))
+```
+
+```{r}
+clinical_annotations <- clinical %>% 
+  select(-c(core_id)) %>%
+  select(acc_num, tma, grade_rev, hist_rev, neoadj, eclass2_ngs, stage_main) %>%
+  mutate(unique_id=paste0(tma, "_", acc_num)) %>%
+  column_to_rownames("unique_id") %>%
+  select(-c(acc_num))
+```
+
+```{r, fig.width = 10, fig.height = 5}
+mat <- scale(density_input %>% na.omit)
+
+## REMOVE THIS IF YOU WANT THE ENTIRE COHORT 
+#mat <- mat[which(row_anno$eclass2_ngs == "p53abn"),] %>% scale
+
+row_hclust <- hclust(dist(mat), method = "ward.D2")
+col_hclust <- hclust(dist(t(mat)), method = "ward.D2")
+
+til_clusters_hierarchical <- cutree(row_hclust, 2)
+names(til_clusters_hierarchical) <- rownames(mat)
+
+row_anno <- clinical_annotations[rownames(mat),]
+row_anno$hclusts <- factor(unname(til_clusters_hierarchical))
+hist_mapping <- c("endometrioid (squamous)" = "endometrioid", 
+                  "mixed endometrioid and serous" = "mixed", 
+                  "mixed serous and moderately differentiated" = "mixed",
+                  "undifferentiated" = "undiff/dediff",
+                  "dedifferentiated" = "undiff/dediff")
+row_anno <- row_anno %>%
+  mutate(hist_rev = case_when(
+    hist_rev %in% names(hist_mapping) ~ hist_mapping[hist_rev],
+    TRUE ~ hist_rev 
+  ))
+
+ha <- rowAnnotation(df = row_anno, annotation_width = 0.02)
+
+density_heatmap <- Heatmap(mat,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = row_hclust,
+                           cluster_columns = col_hclust,
+                           column_names_rot = 60, 
+                           show_row_names = FALSE) + ha
+
+
+draw(density_heatmap, heatmap_legend_side = "right")
+```
+
+## Resummarize counts over TMAs
+
+Now that we've sanity checked the data for different TMAs, we can resummarize counts over TMAs. 
+
+```{r}
+counts_final <- counts_summarized %>%
+  group_by(acc_num, panel, variable, region) %>%
+  summarise(
+    value = sum(value),
+    area_region_mm = sum(area_region_mm)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    density = value/area_region_mm
+  )
+```
+
+
+# Survival modeling
+
+## Input data
+
+```{r}
+clinical_long <- clinical %>%
+  pivot_longer(
+    cols = c(starts_with("os"), starts_with("pfs"), starts_with("dss")),
+    names_to = c("outcome", ".value"),
+    names_sep = "_"
+  ) %>%
+  mutate(sts = str_extract(sts, "(?<=\\.).*"),
+         yrs = as.numeric(yrs),
+         sts = (sts == "event")) %>%
+  filter(!is.na(yrs)) %>%
+  rename(time=yrs,
+         status=sts) %>%
+  ## time == 0 not allowed in cox model
+  filter(time > 0)
+```
+
+```{r}
+clinical_long$outcome %>% table
+```
+
+## Bayesian modeling in Pymc
+
+### Write inputs
+
+```{r}
+# Clinical data, in long format (by outcome type)
+clinical_long_output_path <- here::here("results", "survival_cluster", "clinical_long.tsv")
+# Count data, in long format (by TIL type)
+counts_final_output_path <- here::here("results", "survival_cluster", "counts_final.tsv")
+
+write_tsv(clinical_long, file = clinical_long_output_path)
+write_tsv(counts_final, file = counts_final_output_path)
+```
+
+
+
+
+
+

@@ -10,6 +10,8 @@ output:
 
 ```{r global_chunk_options, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, warning = FALSE, message = FALSE, cache = TRUE, cache.lazy = FALSE, fig.width = 8, fig.height = 4.5)
+
+here::i_am("notebooks/ar_analysis.Rmd")
 ```
 
 ```{r, echo = TRUE}
@@ -26,15 +28,249 @@ library(ggupset)
 library(ggforce)
 library(RColorBrewer)
 library(car)
+library(here)
 ```
+
+
 
 # Data
 
 ```{r}
-ar_area_file <- "../data/AR_area_labeled.tsv"
+ar_area_file <- here("data", "AR_area_labeled.tsv")
+ar_pheno_file <- here("data", "AR_pheno_labeled.tsv")
+clinical_data_file <- here("data", "clinical_data.tsv")
 
 ar_area_raw <- read_tsv(ar_area_file)
+ar_pheno_raw <- read_tsv(ar_pheno_file)
+
+clinical_data <- read_tsv(clinical_data_file)
 ```
+
+
+```{r}
+colname_map <- c(
+  '% Tumour'='area_tumour_pct',
+  '% Stroma'='area_stroma_pct',
+  "Classified Area (mm²)"='area_tissue_mm',
+  "Tumour Area (mm²)"='area_tumour_mm',
+  "Stroma Area (mm²)"='area_stroma_mm',
+  "Tumour: CD68+PDL1-IDO1- Cells"='count_mac_pdl1neg_ido1neg_tumour',
+  "Stroma:CD68+PDL1-IDO1- Cells"='count_mac_pdl1neg_ido1neg_stroma',
+  "Tumour: CD68+PDL1+IDO1- Cells"='count_mac_pdl1pos_ido1neg_tumour',
+  "Stroma:  CD68+PDL1+IDO1- Cells"='count_mac_pdl1pos_ido1neg_stroma',
+  "Tumour: CD68+PDL1+IDO1+ Cells"='count_mac_pdl1pos_ido1pos_tumour',
+  "Stroma: CD68+PDL1+IDO1+ Cells"='count_mac_pdl1pos_ido1pos_stroma',
+  "Tumour: CD68+PDL1-IDO1+ Cells"='count_mac_pdl1neg_ido1pos_tumour',
+  "Stroma: CD68+PDL1-IDO1+ Cells"='count_mac_pdl1neg_ido1pos_stroma',
+  "Tumour: CD8+PD1- Cells"='count_tcyto_pd1neg_tumour',
+  "Stroma: CD8+PD1- Cells"='count_tcyto_pd1neg_stroma',
+  "Tumour: CD8+PD1+ Cells"='count_tcyto_pd1pos_tumour',
+  "Stroma: CD8+PD1+ Cells"='count_tcyto_pd1pos_stroma',
+  "Tumour: CD8-PD1+ Cells"='count_tcd8neg_pd1pos_tumour',
+  "Stroma: CD8-PD1+ Cells"='count_tcd8neg_pd1pos_stroma'
+)
+
+ar_pheno_data <- ar_pheno_raw %>% 
+  rename_with(~ colname_map[.], .cols = names(colname_map)) %>%
+  # This rule shouldn't apply
+  filter(ifelse(is.na(notes), TRUE, !str_detect(notes, pattern = "(Exclude|exclude)"))) %>%
+  # This rule shouldn't apply
+  mutate(acc_num=str_replace(acc_num, " \\(.*", "")) %>%
+  select(c("tma", "acc_num", unname(colname_map)))
+
+ar_pheno_long <- ar_pheno_data %>%
+  pivot_longer(cols = all_of(colnames(ar_pheno_data)[str_detect(colnames(ar_pheno_data), "^(area|count)")]), 
+               names_to = "variable", 
+               values_to = "value")
+```
+
+```{r}
+area_distributions <- ar_pheno_long %>%
+  filter(str_detect(variable, "^area")) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 10, fill = "lightblue", color = "black") +
+  facet_wrap(vars(variable), scales = "free") +
+  labs(title = "Variables") + 
+  theme_pubclean() + 
+  ggtitle("Region area per core")
+
+count_distributions <- ar_pheno_long %>%
+  filter(str_detect(variable, "^count")) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  scale_x_continuous(trans = 'log1p', breaks = c(0, 1, 10, 100, 1000, 10000),
+                     labels = c("0", "1", "10", "100", "1000", "10000")) + 
+  facet_wrap(vars(variable), scales = "free") +
+  labs(title = "Variables") + 
+  theme_pubr() + 
+  ggtitle("Count per core")
+```
+
+## Region area distribution
+
+```{r, fig.width=6, fig.height=4}
+area_distributions
+```
+
+## Count distribution
+
+```{r, fig.width=10, fig.height=6}
+count_distributions
+```
+
+```{r}
+ar_counts_long <- ar_pheno_data %>%
+  pivot_longer(cols = colnames(ar_pheno_data)[startsWith(colnames(ar_pheno_data), "count")],
+               names_to = "variable", 
+               values_to = "value") %>%
+  mutate(area_region_mm=ifelse(str_detect(variable, "tumour"),
+                               area_tumour_mm,
+                               area_stroma_mm))
+
+ar_counts_sum_long <- ar_counts_long %>%
+  group_by(acc_num, variable) %>%
+  summarise(
+    var=var(value/area_region_mm),
+    var_count=var(value),
+    count=round(sum(value), 0),
+    value=sum(value)/sum(area_region_mm),
+    area=sum(area_region_mm)
+  ) %>%
+  ungroup() %>%
+  mutate(variable = str_replace(variable, "^count", "dens"),
+         unique_id=acc_num) %>%
+  select(unique_id, everything())
+```
+
+## Mean-variance
+
+```{r, fig.width=6, fig.height=4}
+ggplot(ar_counts_sum_long, aes(x=count, y=var_count)) + 
+  geom_point(alpha = 0.3) +
+  stat_smooth(method="loess", colour="blue", alpha = 0.3) + 
+  facet_wrap(~ variable) + 
+  theme_minimal() + 
+  scale_x_continuous(trans = "log1p", breaks = c(0, 1, 10, 100, 1000, 10000)) + 
+  scale_y_continuous(trans = "log1p", breaks = c(0, 1, 10, 100, 1000, 10000)) + 
+  geom_abline(slope=1, colour='red', alpha = 0.3) + 
+  xlab("Count") + 
+  ylab("Variance")
+```
+
+```{r}
+ar_densities <- ar_counts_sum_long %>%
+  mutate(value = log1p(value)) 
+
+ar_densities_wide <- ar_densities %>%
+  select(-c(count, area, var, var_count)) %>%
+  pivot_wider(names_from = variable, values_from = value)
+
+ar_densities_heatmap_input <- ar_densities_wide %>% select(colnames(ar_densities_wide)[str_detect(colnames(ar_densities_wide), "^dens")]) %>% as.matrix
+rownames(ar_densities_heatmap_input) <- ar_densities_wide$unique_id
+```
+
+```{r}
+group_by_cols <- setdiff(colnames(clinical_data), c("tma", "core_id"))
+
+clinical_data_unique <- clinical_data %>% 
+  group_by_at(group_by_cols) %>%
+  summarise(across(everything(), ~ paste(., collapse = ","))) %>%
+  ungroup()
+
+clinical_anno <- clinical_data_unique %>%
+  select(acc_num, tma, grade_rev, hist_rev, neoadj, eclass2_ngs) %>%
+  mutate(unique_id=acc_num) %>%
+  column_to_rownames("unique_id") %>%
+  select(-c(acc_num))
+```
+
+
+```{r, fig.width = 12, fig.height = 5}
+input_mat <- scale(ar_densities_heatmap_input %>% na.omit)
+
+## REMOVE THIS IF YOU WANT THE ENTIRE COHORT 
+#input_mat <- input_mat[which(row_anno$eclass2_ngs == "p53abn"),] %>% scale
+
+row_hclust <- hclust(dist(input_mat), method = "ward.D2")
+col_hclust <- hclust(dist(t(input_mat)), method = "ward.D2")
+
+ar_clusters <- cutree(row_hclust, 3)
+names(ar_clusters) <- rownames(input_mat)
+
+outcome_clusters <- read_tsv(here::here("results", "outcome_clusters_long.tsv"))
+tilclust_assignments <- outcome_clusters %>% 
+  filter(outcome == "pfs") %>%
+  dplyr::select(acc_num, clust) %>%
+  dplyr::mutate(clust = factor(clust, levels = c("0", "1")))
+  unique
+
+tilclust_assignments_rn <- tilclust_assignments %>% 
+  column_to_rownames("acc_num")
+
+pca_res <- prcomp(input_mat)
+
+row_anno <- clinical_anno[rownames(input_mat),]
+row_anno$ar_clusters <- factor(unname(ar_clusters))
+hist_mapping <- c("endometrioid (squamous)" = "endometrioid", 
+                  "mixed endometrioid and serous" = "mixed", 
+                  "mixed serous and moderately differentiated" = "mixed",
+                  "undifferentiated" = "undiff/dediff",
+                  "dedifferentiated" = "undiff/dediff")
+row_anno <- row_anno %>%
+  mutate(hist_rev = case_when(
+    hist_rev %in% names(hist_mapping) ~ hist_mapping[hist_rev],
+    TRUE ~ hist_rev 
+  ))
+row_anno <- row_anno %>%
+  cbind(pca_res$x[,1:4])
+row_anno$tilclust <- tilclust_assignments_rn[rownames(row_anno),]
+
+ha <- rowAnnotation(df = row_anno, annotation_width = 0.02, col = list(
+  PC1=colorRamp2(c(min(row_anno$PC1), 0, max(row_anno$PC1)), c("blue", "white", "red")),
+  PC2=colorRamp2(c(min(row_anno$PC2), 0, max(row_anno$PC2)), c("blue", "white", "red")),
+  PC3=colorRamp2(c(min(row_anno$PC3), 0, max(row_anno$PC3)), c("blue", "white", "red")),
+  PC4=colorRamp2(c(min(row_anno$PC4), 0, max(row_anno$PC4)), c("blue", "white", "red"))))
+
+density_heatmap <- Heatmap(input_mat,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = row_hclust,
+                           cluster_columns = col_hclust,
+                           column_names_rot = 60, 
+                           show_row_names = FALSE) + ha
+
+
+draw(density_heatmap, heatmap_legend_side = "right")
+```
+```{r, fig.width = 12, fig.height = 5}
+density_heatmap <- Heatmap(input_mat,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           column_names_rot = 60, 
+                           show_row_names = FALSE,
+                           row_split = row_anno$tilclust) + ha
+
+
+draw(density_heatmap, heatmap_legend_side = "right")
+```
+
+```{r, fig.width = 10, fig.height = 10}
+ar_densities_clusts <- ar_densities %>%
+  left_join(tilclust_assignments)
+
+ggplot(ar_densities_clusts, aes(x=clust, y=value)) + 
+  geom_boxplot(width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
+  theme_pubr() + 
+  stat_compare_means(vjust = 0.7, size = 3) + 
+  facet_wrap(~ variable) 
+```
+
+
+
+# OLD AREA ANALYSIS -- NOT USEFUL 
 
 ```{r}
 ar_area <- ar_area_raw %>%

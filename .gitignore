@@ -2,9 +2,9 @@
 *_files/
 *.rdata
 *.RData
-B&T Panel/*
-AdaptR Panel/*
-Angio Panel/*
+data/raw/B&T Panel/*
+data/raw/AdaptR Panel/*
+data/raw/Angio Panel/*
 *.html
 survival_mixture_modelling.pkl
 ~*
@@ -13,3 +13,7 @@ survival_mixture_modelling.pkl
 .ipynb_checkpoints/
 *.log
 unnamed-chunk-*
+data/processed_old
+results/old
+tikz*.tex
+*.nc

@@ -1,7 +1,7 @@
 ---
 title: "Adaptive response preprocessing"
 output: 
-  html_notebook:
+  html_document:
       code_folding: hide
 ---
 
@@ -163,4 +163,66 @@ area_quant_labeled <- area_quant %>%
 output_dir <- "../data"
 
 write_tsv(area_quant_labeled, file = file.path(output_dir, "AR_area_labeled.tsv"))
+```
+
+```{r}
+ar_pheno_file_path <- file.path(ar_dir, "22-004 A B AdaptR FINAL count data 9NOV2023.xlsx")
+ar_pheno_sheetnames <- excel_sheets(ar_pheno_file_path)
+
+ar_pheno_data <- lapply(ar_pheno_sheetnames, function(sn) {
+  df <- read_excel(ar_pheno_file_path, na = c("", "x"), sheet = sn)
+  df <- df %>%
+    dplyr::mutate(tma=str_extract(`Image Tag`, "^[0-9]{2}_[0-9]{3}[A-Z]?")) %>%
+    ## The labeling scheme seems to be different each time ... 
+    dplyr::mutate(
+      tma = dplyr::recode(tma,
+                          "10_005V"="10-005",
+                          "10_006V"="10-006",
+                          "22_004A"="22-004A",
+                          "22_004V"="22-004B")
+    ) %>%
+    dplyr::mutate(
+      secrowcol=str_extract(`Image Tag`, "(?<=Core\\[)[0-9,]+(?=\\])")
+    ) %>%
+    separate(secrowcol, sep = ",", c("sector", "row2", "col2")) %>%
+    dplyr::mutate(
+      sector = as.numeric(sector),
+      row = ifelse(tma == "22-004B", as.numeric(col2), as.numeric(row2)),
+      col = ifelse(tma == "22-004B", as.numeric(row2), as.numeric(col2))
+    ) %>%
+    dplyr::select(-c(row2, col2))
+  
+  return(df)
+}) 
+names(ar_pheno_data) <- ar_pheno_sheetnames
+
+# Manually checked that this has the same number of rows as all the sub-data frames
+ar_pheno_merged <- reduce(ar_pheno_data, dplyr::inner_join, by = c("Image Tag", "tma", "sector", "row", "col", "Classified Area (mm²)", "Stroma Area (mm²)", "Tumour Area (mm²)", "% Stroma", "% Tumour"))
+
+ar_pheno_labeled <- ar_pheno_merged %>%
+  left_join(sample_map) %>%
+  dplyr::select(tma, acc_num, sector, row, col, core, notes.y, everything()) %>%
+  dplyr::select(-c(notes.x)) %>%
+  dplyr::rename(notes=notes.y) %>%
+  dplyr::arrange(tma, sector, row, col, acc_num) %>%
+  dplyr::mutate(
+    acc_num=str_replace(acc_num, "-(0+)", "-")
+  ) %>%
+  # THIS WILL NEED TO GO IN B&T ANALYSIS TOO
+  dplyr::mutate(
+    acc_num=dplyr::recode(
+      acc_num,
+      'O3S-2724'='VS03-2724',
+      'YW-EC002'='VS08-19857',
+      'YW-EC003'='VS10-497',
+      'YW-EC005'='VS10-25417',
+      'YW-EC008'='VS13-5723',
+      'YW-EC010'='VS13-19793',
+      'YW-EC014'='VS16-22196'
+    )
+  )
+```
+
+```{r}
+write_tsv(ar_pheno_labeled, file = file.path(output_dir, "AR_pheno_labeled.tsv"))
 ```

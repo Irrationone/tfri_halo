@@ -65,6 +65,10 @@ b_t_data_revised <- b_t_data_revised %>%
   mutate(`Accession#`=str_replace(`Accession#`, "-(0+)", "-"))
 ```
 
+```{r, eval = FALSE}
+write_tsv(clinical_data, file = "../data/clinical_data.tsv")
+```
+
 
 ```{r}
 colname_map <- c(
@@ -1219,16 +1223,19 @@ ggplot(ploidy_clust_long, aes(x=factor(clust), y=value)) +
 ```
 
 
+
 # Outputs
 
 Write outputs that we need for other analyses. 
 
-```{r, eval = FALSE}
+```{r}
 ## TIL densities table after preprocessing 
 til_densities_output <- til_densities_sum_long %>%
   select(acc_num, variable, value, area) %>%
   rename(density=value) 
+```
 
+```{r, eval = FALSE}
 write_tsv(til_densities_output, file = "../results/til_densities_output.tsv")
 ```
 
