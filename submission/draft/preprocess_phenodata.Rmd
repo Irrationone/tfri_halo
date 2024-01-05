@@ -15,6 +15,7 @@ library(tidyverse)
 library(readxl)
 library(here)
 library(janitor)
+library(fs)
 ```
 
 # Functions
@@ -52,8 +53,7 @@ convert_sectormap_to_long <- function(sectormap) {
     df %>%
       gather(col, core, -row) %>%
       filter(!is.na(core)) %>%
-      mutate(core = as.numeric(core), row = as.numeric(row), sector = as.numeric(sector_label),
-             col = as.numeric(col)) %>%
+      mutate(core = as.numeric(core), sector = as.numeric(sector_label)) %>%
       arrange(row, col)
   }) %>% bind_rows()
   
@@ -505,3 +505,116 @@ ar_output_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
 
 write_tsv(ar_pheno_all, file = ar_output_path)
 ```
+
+
+# Angiogenesis
+
+We'll import angiogenesis results for the purposes of looking at vessel density, as our ability to assess the other markers is limited due to significant batch effects. 
+
+```{r}
+angio_dir <- here::here("data", "raw", "Angio Panel")
+
+angio_map_files <- file.path(angio_dir, "Angio SectorMaps", 
+                             c("10-005 G3 Endometrioid Endometrial Carcinoma.xls",
+                               "10-006 High-Grade Serous Endometrial Carcinoma.xls",
+                               "22-004 P53 Abnormal Endometrial Carcinoma Tumours (mixed sites).xlsx")
+)
+
+sectormaps <- list(
+  '10-005'=read_excel(angio_map_files[1], sheet = "SectorMap-HALO", col_names = FALSE, skip = 2),
+  '10-006'=read_excel(angio_map_files[2], sheet = "SectorMap-HALO2", col_names = FALSE, skip = 2),
+  '22-004A'=read_excel(angio_map_files[3], sheet = "SectorMap A-HALO", col_names = FALSE, skip = 2),
+  '22-004B'=read_excel(angio_map_files[3], sheet = "SectorMap B-HALO", col_names = FALSE, skip = 2)
+)
+
+core_ids <- list(
+  '10-005'=read_excel(angio_map_files[1], sheet = "CoreID", skip = 2),
+  '10-006'=read_excel(angio_map_files[2], sheet = "CoreID", skip = 2),
+  '22-004A'=read_excel(angio_map_files[3], sheet = "Core ID", skip = 2),
+  '22-004B'=read_excel(angio_map_files[3], sheet = "Core ID", skip = 2)
+)
+```
+
+```{r}
+sectormaps_long <- lapply(names(sectormaps), function(x) {
+  convert_sectormap_to_long(sectormaps[[x]]) %>%
+    mutate(tma=x) %>%
+    select(tma, everything())
+}) %>% bind_rows()
+
+core_ids_long <- lapply(names(core_ids), function(x) {
+  df <- core_ids[[x]] %>%
+    mutate(tma=x) %>%
+    rename(core=CoreID) %>%
+    select(tma, everything())
+  colnames(df) <- str_replace(colnames(df), "( )*#$", "")
+  return(df)
+}) %>% bind_rows()
+
+# Sample map, in long format, derived from the weird TMA maps
+sample_map <- sectormaps_long %>% 
+  inner_join(core_ids_long) %>%
+  rename(acc_num=Accession, block=Block, backup=Backup) %>%
+  select(tma, sector, core, row, col, acc_num, block, backup) %>%
+  dplyr::mutate(
+    row = as.character(row),
+    col = as.character(col)
+  )
+```
+
+
+```{r}
+angio_data_dir <- file.path(angio_dir, "Final FL 10-005 10-006 22-004A-B Angio")
+angio_data_files <- dir_ls(angio_data_dir, regexp = ".xls(x)?")
+
+angio_data_files <- angio_data_files[!str_detect(angio_data_files, "ERG1")]
+
+angio_data <- lapply(angio_data_files, function(fp) {
+  sheetnames <- excel_sheets(fp)
+  
+  region_dfs <- lapply(sheetnames, function(x) {
+    df <- read_excel(fp, sheet = x, na = c("", "x", "tk"))
+    df <- df %>%
+      rename(row=`TMA Row`,
+             col=`TMA Column`,
+             tma=`TMA Block Name`,
+             notes=Notes) %>%
+      select(-c(`Image Stain`, `Area Analyzed (μm²)`)) %>%
+      mutate(tma=str_extract(x, "[0-9]{2}\\-[0-9]{3}[A-Z]?"),
+             row=as.character(row),
+             col=as.character(col))
+    
+    return(df)
+  }) 
+  
+  region_dfs_merged <- region_dfs %>% reduce(inner_join)
+}) %>% bind_rows()
+
+angio_data_labeled <- angio_data %>%
+  inner_join(sample_map) %>%
+  select(tma, acc_num, row, col, notes, everything()) %>%
+  arrange(tma, row, col, acc_num)
+```
+
+```{r}
+colname_map <- c(
+  "Tumour Area (mm²)"='area_tumour_mm',
+  "Stroma Area (mm²)"='area_stroma_mm',
+  "Vessel Area (mm²)"='area_vessel_mm'
+)
+
+angio_data_labeled <- angio_data_labeled %>% 
+  rename_with(~ colname_map[.], .cols = names(colname_map)) %>%
+  # This rule shouldn't apply
+  filter(ifelse(is.na(notes), TRUE, !str_detect(notes, pattern = "(Exclude|exclude|discard)"))) %>%
+  # This rule shouldn't apply
+  mutate(acc_num=str_replace(acc_num, " \\(.*", "")) %>%
+  select(c(tma, sector, row, col, acc_num, block, unname(colname_map)))
+```
+
+```{r}
+angio_output_path <- here::here("data", "processed", "angio_labeled.tsv")
+
+write_tsv(angio_data_labeled, file = angio_output_path)
+```
+

@@ -43,6 +43,9 @@ bt_data_path <- here::here("data", "processed", "bt_labeled.tsv")
 
 # Adaptive resistance 
 ar_pheno_data_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
+
+# Angio (areas only now)
+angio_data_path <- here::here("data", "processed", "angio_labeled.tsv")
 ```
 
 
@@ -52,6 +55,8 @@ clinical <- read_tsv(clinical_data_path)
 bt <- read_tsv(bt_data_path)
 
 ar_pheno <- read_tsv(ar_pheno_data_path)
+
+angio <- read_tsv(angio_data_path)
 ```
 
 ```{r}
@@ -64,9 +69,13 @@ bt <- bt %>%
 ar_pheno <- ar_pheno %>%
   select(-c(block)) 
 
+angio <- angio %>%
+  select(-c(block))
+
 # Remove rows with no entries
 bt_clean <- bt[complete.cases(bt),]
 ar_pheno_clean <- ar_pheno[complete.cases(ar_pheno),]
+angio_clean <- angio[complete.cases(angio),]
 ```
 
 
@@ -91,6 +100,16 @@ ar_pheno_long <- ar_pheno_clean %>%
                values_to = "value") %>%
   mutate(
     panel = "AR",
+    row = as.character(row),
+    col = as.character(col)
+  )
+
+angio_long <- angio_clean %>%
+  pivot_longer(cols = all_of(colnames(angio_clean)[str_detect(colnames(angio_clean), "^(area)")]),
+               names_to = "variable",
+               values_to = "value") %>%
+  mutate(
+    panel = "angio",
     row = as.character(row),
     col = as.character(col)
   )
@@ -208,6 +227,28 @@ The correlation is high. A caveat is that the absolute counts on the y-axis are 
 ## Hierarchical clustering
 
 ```{r}
+angio_summarized <- angio_long %>%
+  group_by(tma, acc_num, panel, variable) %>%
+  summarise(
+    value=sum(value)
+  ) %>%
+  ungroup()
+
+vessel_wide <- angio_summarized %>%
+  select(-c(panel)) %>%
+  pivot_wider(names_from = "variable", values_from = "value") %>%
+  mutate(
+    unique_id=paste0(str_replace(tma, "[AB]$", ""), "_", acc_num),
+    frac_vessel_stroma=area_vessel_mm/(area_stroma_mm+area_vessel_mm),
+    frac_vessel_all=area_vessel_mm/(area_stroma_mm+area_vessel_mm+area_tumour_mm)
+  )
+
+vessel_df <- vessel_wide %>%
+  select(unique_id, frac_vessel_stroma, frac_vessel_all) %>%
+  unique
+```
+
+```{r}
 densities <- counts_summarized %>%
   mutate(log_density = log1p(density),
          variable_full = paste0(variable, "_", region))
@@ -226,7 +267,12 @@ rownames(density_input) <- with(densities_wide, paste0(str_replace(tma, "[AB]$",
 clinical_annotations <- clinical %>% 
   select(-c(core_id)) %>%
   select(acc_num, tma, grade_rev, hist_rev, neoadj, eclass2_ngs, stage_main) %>%
-  mutate(unique_id=paste0(tma, "_", acc_num)) %>%
+  mutate(unique_id=paste0(tma, "_", acc_num))
+  #column_to_rownames("unique_id") %>%
+  #select(-c(acc_num))
+
+overall_annotations <- clinical_annotations %>%
+  left_join(vessel_df) %>%
   column_to_rownames("unique_id") %>%
   select(-c(acc_num))
 ```
@@ -243,7 +289,7 @@ col_hclust <- hclust(dist(t(mat)), method = "ward.D2")
 til_clusters_hierarchical <- cutree(row_hclust, 2)
 names(til_clusters_hierarchical) <- rownames(mat)
 
-row_anno <- clinical_annotations[rownames(mat),]
+row_anno <- overall_annotations[rownames(mat),]
 row_anno$hclusts <- factor(unname(til_clusters_hierarchical))
 hist_mapping <- c("endometrioid (squamous)" = "endometrioid", 
                   "mixed endometrioid and serous" = "mixed", 
@@ -256,7 +302,8 @@ row_anno <- row_anno %>%
     TRUE ~ hist_rev 
   ))
 
-ha <- rowAnnotation(df = row_anno, annotation_width = 0.02)
+ha <- rowAnnotation(df = row_anno, annotation_width = 0.02,
+                    col = list(frac_vessel_stroma=colorRamp2(c(0, 1), c("white", "black"))))
 
 density_heatmap <- Heatmap(mat,
                            na_col = "gray",
@@ -328,7 +375,444 @@ write_tsv(counts_final, file = counts_final_output_path)
 ```
 
 
+### Read outputs
+
+```{r}
+trace_subdir <- "traces_3clust"
+
+trace_tables <- list(
+  'os'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "os_trace_table.tsv")),
+  'pfs'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "pfs_trace_table.tsv")),
+  'dss'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "dss_trace_table.tsv"))
+  #'test'=read_tsv(here::here("results", "survival_cluster", "traces", "test_trace_table.tsv"))
+) %>%
+  lapply(
+    function(x) {
+      colnames(x)[1] <- "iter"
+      x <- x %>%
+        pivot_longer(cols = -iter, 
+                     names_to = "variable", 
+                     values_to = "value")
+      return(x)
+    }
+  )
+
+clust_assignments <- list(
+  'os'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "os_cluster_assignments.tsv")),
+  'pfs'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "pfs_cluster_assignments.tsv")),
+  'dss'=read_tsv(here::here("results", "survival_cluster", trace_subdir, "dss_cluster_assignments.tsv"))
+  #'test'=read_tsv(here::here("results", "survival_cluster", "traces", "test_cluster_assignments.tsv"))
+) %>%
+  lapply(
+    function(x) {
+      x <- x[,2:ncol(x)]
+      x <- x %>%
+        pivot_longer(cols = -acc_num, 
+                     names_to = "iter", 
+                     values_to = "clust")
+      return(x)
+    }
+  )
+```
+
+### Cluster assignments
+
+```{r}
+trace_tables_merged <- lapply(names(trace_tables), function(x) {
+  df <- trace_tables[[x]]
+  df$outcome <- x
+  return(df)
+}) %>% 
+  bind_rows()
+
+clust_assignments_merged <- lapply(names(clust_assignments), function(x) {
+  df <- clust_assignments[[x]]
+  df$outcome <- x
+  return(df)
+}) %>% 
+  bind_rows()
+
+clust_assignments_summarized <- clust_assignments_merged %>%
+  group_by(acc_num, outcome, clust) %>%
+  summarise(count=n()) %>%
+  ungroup() %>%
+  arrange(outcome, acc_num, clust)
+
+total_iters <- clust_assignments_summarized %>%
+  group_by(acc_num, outcome) %>%
+  summarise(total_count=sum(count)) %>%
+  ungroup()
+
+clust_assignments_summarized <- clust_assignments_summarized %>%
+  left_join(total_iters) %>%
+  mutate(count_pct=count/total_count)
+
+clust_assignments_map <- clust_assignments_summarized %>%
+  group_by(acc_num, outcome) %>%
+  summarise(
+    clust_map=clust[which.max(count)],
+    count_pct=max(count_pct)
+  )
+
+clust_assignments_map_comb_outcomes <- clust_assignments_summarized %>%
+  #filter(outcome == "test") %>%
+  group_by(acc_num, clust) %>%
+  summarise(
+    count=sum(count),
+    total_count=sum(total_count),
+    count_pct=count/total_count
+  ) %>%
+  ungroup() %>%
+  group_by(acc_num) %>%
+  summarise(
+    clust_map=clust[which.max(count)],
+    count_pct=max(count_pct)
+  ) %>%
+  ungroup() %>%
+  mutate(clust_map=factor(clust_map, levels = as.character(sort(unique(clust_map)))))
+```
+
+```{r}
+angio_summarized_comb_tma <- angio_long %>%
+  group_by(acc_num, panel, variable) %>%
+  summarise(
+    value=sum(value)
+  ) %>%
+  ungroup()
+
+vessel_wide_comb_tma <- angio_summarized_comb_tma %>%
+  select(-c(panel)) %>%
+  pivot_wider(names_from = "variable", values_from = "value") %>%
+  mutate(
+    frac_vessel_stroma=area_vessel_mm/(area_stroma_mm+area_vessel_mm),
+    frac_vessel_all=area_vessel_mm/(area_stroma_mm+area_vessel_mm+area_tumour_mm)
+  )
+
+vessel_df_comb_tma <- vessel_wide_comb_tma %>%
+  select(acc_num, frac_vessel_stroma, frac_vessel_all) %>%
+  unique
+```
+
+
+```{r}
+clinical_annotations_comb_tma <- clinical %>%
+  select(-c(core_id)) %>%
+  select(acc_num, grade_rev, hist_rev, neoadj, eclass2_ngs, stage_main, tma) %>%
+  group_by(acc_num, grade_rev, hist_rev, neoadj, eclass2_ngs, stage_main) %>%
+  summarise(tma = paste(tma, collapse = ",")) %>%
+  ungroup() %>%
+  unique %>%
+  left_join(clust_assignments_map_comb_outcomes)
+
+overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
+  left_join(vessel_df_comb_tma)
+
+densities_final <- counts_final %>%
+  mutate(log_density = log1p(density),
+         variable_full = paste0(variable, "_", region))
+
+densities_final_wide <- densities_final %>%
+  select(-c(value, area_region_mm, density, panel, variable, region)) %>%
+  pivot_wider(names_from = variable_full, values_from = log_density)
+
+density_final_input <- densities_final_wide %>% 
+  column_to_rownames("acc_num") %>%
+  as.matrix
+```
+
+```{r, fig.width=10, fig.height=8}
+tilclust_color_map <- c('0'='#F5DD90',
+                        '1'='#F76C5E',
+                        '2'='#324376',
+                        '3'='#6AB547')
+
+mat <- (density_final_input %>% na.omit) %>% scale
+
+row_anno <- (overall_annotations_comb_tma %>% column_to_rownames("acc_num"))[rownames(mat),]
+
+mat <- mat[which(row_anno$eclass2_ngs == "p53abn" & !is.na(row_anno$clust_map)),] %>% scale
+row_anno <- row_anno[rownames(mat),]
+
+hist_mapping <- c("endometrioid (squamous)" = "endometrioid", 
+                  "mixed endometrioid and serous" = "mixed", 
+                  "mixed serous and moderately differentiated" = "mixed",
+                  "undifferentiated" = "undiff/dediff",
+                  "dedifferentiated" = "undiff/dediff")
+row_anno <- row_anno %>%
+  mutate(hist_rev = case_when(
+    hist_rev %in% names(hist_mapping) ~ hist_mapping[hist_rev],
+    TRUE ~ hist_rev 
+  ))
+
+ha <- rowAnnotation(df = row_anno, annotation_width = 0.02, 
+                    col = list(
+                      clust_map=tilclust_color_map,
+                      frac_vessel_stroma=colorRamp2(c(0, 1), c("white", "red"))
+                    ))
+
+density_heatmap <- Heatmap(mat,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           clustering_method_columns = "ward.D2",
+                           clustering_method_rows = "ward.D2",
+                           column_names_rot = 60, 
+                           show_row_names = FALSE, row_split = row_anno$clust_map) + ha
+
+
+draw(density_heatmap, heatmap_legend_side = "right")
+```
+
+```{r, fig.height = 22, fig.width = 10}
+densities_labeled <- densities_final %>%
+  inner_join(clinical_annotations_comb_tma) %>%
+  filter(
+    eclass2_ngs == "p53abn",
+    !is.na(clust_map)
+  )
+
+pvals <- compare_means(density ~ clust_map, densities_labeled, group.by = c("variable", "region"), method = "wilcox.test", p.adjust.method = "holm")
+
+#pvals <- densities_labeled %>% group_by(variable, region) %>% dunn_test(density ~ clust_map) %>% adjust_pvalue(p.col = "p", output.col = "p.adj", method = "holm")
+
+ggplot(densities_labeled, aes(x=clust_map, y=log_density)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  theme_pubr() + 
+  facet_grid(variable ~ region, scales = "free") + 
+  #stat_compare_means(vjust = 0.7, size = 3)
+  #scale_y_log10() + 
+  stat_pvalue_manual(data = pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 8, vjust=1.2, size = 3) + 
+  scale_fill_manual(values = tilclust_color_map)
+```
+
+With Bonferroni correction, all comparisons EXCEPT the ones for PDL1 *negative* macrophages (regardless of IDO1 status) are significantly higher in the high-TIL cluster compared to the low-TIL cluster. 
+
+
+### Tumour-stroma ratios
+
+```{r, fig.width = 15, fig.height = 12}
+density_ts_ratios <- densities_labeled %>%
+  group_by(acc_num, panel, variable, grade_rev, hist_rev, neoadj, eclass2_ngs, stage_main, clust_map, count_pct) %>%
+  summarise(
+    tumour_stroma_ratio=density[region == "tumour"]/density[region == "stroma"],
+    area_stroma=area_region_mm[region == "stroma"],
+    area_tumour=area_region_mm[region == "tumour"]
+  ) %>%
+  ungroup() %>%
+  filter(area_stroma > 0.01, area_tumour > 0.01)
+
+# Necessary to always do this, as scale_y_log10 will make stat_compare_means perform a test on the log
+#pvals <- density_ts_ratios %>% group_by(variable) %>% dunn_test(tumour_stroma_ratio ~ clust_map) %>% adjust_pvalue(p.col = "p", output.col = "p.adj", method = "holm")
+
+pvals <- compare_means(tumour_stroma_ratio ~ clust_map, data = density_ts_ratios, group.by = c("variable"), method = "wilcox.test", p.adjust.method = "holm")
+
+ggplot(density_ts_ratios, aes(x=clust_map, y=tumour_stroma_ratio)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) + 
+  theme_pubr() + 
+  facet_wrap(~ variable, scales = "free_y", ncol = 3) +
+  scale_y_log10() + 
+  stat_pvalue_manual(data = pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 1, vjust=1.5, size = 3) + 
+  scale_fill_manual(values = tilclust_color_map)
+```
+
+There is a significant difference in the intratumoural/stromal ratio of CD8+ T cells between the two clusters and CD8-PD1+ cells (?unknown significance; not sure if these are even specifically lymphocytes given that those counts are from the AR panel which doesn't have CD3). 
+
+### CD8/Treg ratio
+
+The cytotoxic T cell/Treg ratio is commonly cited in the literature. 
+
+```{r, fig.width = 8, fig.height = 6}
+densities_cyto <- densities_labeled %>% 
+  filter(variable %in% c("tcyto", "tcyto_pd1neg", "tcyto_pd1pos")) %>%
+  rename(cyto_density=density)
+
+densities_treg <- densities_labeled %>% 
+  filter(variable %in% c("treg")) %>%
+  rename(treg_density=density) %>%
+  select(c(acc_num, region, treg_density))
+
+densities_cyto_treg <- densities_cyto %>%
+  left_join(densities_treg) %>%
+  mutate(cyto_treg_ratio=cyto_density/treg_density) %>%
+  filter(area_region_mm > 0.01)
+
+pvals <- compare_means(cyto_treg_ratio ~ clust_map, densities_cyto_treg, group.by = c("variable", "region"), p.adjust.method = "holm")
+
+ggplot(densities_cyto_treg, aes(x=clust_map, y=cyto_treg_ratio)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) + 
+  theme_pubr() + 
+  facet_grid(variable ~ region, scales = "free_y") +
+  scale_y_log10() + 
+  stat_pvalue_manual(data = pvals, label = "p.adj", y.position = 1, vjust=1.5, size = 3) + 
+  scale_fill_manual(values = tilclust_color_map)
+```
+The effect is particularly pronounced with CD8+PD1+ cytotoxic T cells, within the intraepithelial component especially. Perhaps suggest therapeutic implications here. 
+
+### Cox proportional hazards
+
+
+```{r}
+max_iter <- length(unique(trace_tables_merged$iter))
+
+cox_hazards <- trace_tables_merged %>%
+  group_by(outcome, variable) %>%
+  summarise(
+    log.estimate=mean(value),
+    log.conf.low=quantile(value, 0.025),
+    log.conf.high=quantile(value, 0.975),
+    p.value=min(sum(value >= 0)/length(value), sum(value <= 0)/length(value))
+  ) %>%
+  ungroup() %>%
+  mutate(
+      estimate=exp(log.estimate),
+      conf.low=exp(log.conf.low),
+      conf.high=exp(log.conf.high)
+    )
+
+cox_hazards_renamed <- cox_hazards %>%
+  mutate(variable = str_replace(variable, "^beta_", "")) %>%
+  filter(!variable %in% c("clust_0", "stage_0")) %>%
+  filter(!str_detect(variable, "^props")) %>%
+  mutate(category = case_when(
+    str_detect(variable, "^stage") ~ "Stage",
+    TRUE ~ "")) %>%
+  mutate(variable = dplyr::recode(variable, 
+                           clust_1 = "High TIL",
+                           clust_2 = "Low TIL",
+                           stage_1 = "II",
+                           stage_2 = "III",
+                           stage_3 = "IV",
+                           chemo = "Chemotherapy",
+                           brachy = "Brachytherapy",
+                           rt = "Radiotherapy",
+                           age = "Age")) %>%
+  mutate(variable = factor(variable, levels = c("Age", "High TIL", "Low TIL", "Chemotherapy", "Brachytherapy", "Radiotherapy", "II", "III", "IV")))
+```
+
+
+```{r}
+ggplot(cox_hazards_renamed, aes(y=variable, group=outcome, colour=outcome)) + 
+  geom_point(aes(x=exp(log.estimate)), position=position_dodge(width=0.5), shape=15, size=3) + 
+  geom_linerange(aes(xmin=exp(log.conf.low), xmax=exp(log.conf.high)), position=position_dodge(width=0.5)) + 
+  theme_pubr() + 
+  geom_vline(xintercept = c(0.1, 0.2, 0.5, 2, 4, 8, 16, 32), linetype = 3) + 
+  geom_vline(xintercept = 1, alpha = 0.7) + 
+  facet_col(~ category, scales = "free_y", space = "free", strip.position = "left") + 
+  theme(strip.placement = "outside", strip.background = element_blank(), strip.text = element_text(face = "bold")) + 
+  ylab("") + 
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = brewer.pal(4, "Set2")) + 
+  xlab("Hazard ratio") + 
+  scale_x_continuous(trans = "log", breaks = c(0.1, 0.2, 0.5, 1, 2, 4, 8, 16, 32))
+```
+
+
+# Exploratory
+
+## Three immune clusters
+
+## Vessel density 
+
+```{r}
+vessel_clinical_long <- overall_annotations_comb_tma %>% 
+  pivot_longer(cols = colnames(overall_annotations_comb_tma)[str_detect(colnames(overall_annotations_comb_tma), "^frac")],
+               names_to = "variable",
+               values_to = "value") %>%
+  filter(!is.na(clust_map))
+
+ggplot(vessel_clinical_long, aes(x=clust_map, y=value)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) + 
+  theme_pubr() + 
+  facet_wrap(~ variable, scales = "free_y") +
+  stat_compare_means(size = 3, comparisons = list(c("0", "2"), c("0", "1"), c("1", "2"))) + 
+  scale_fill_manual(values = tilclust_color_map)
+```
 
 
 
+## Cox modeling of IDO1 in cold tumours
+
+```{r}
+log_densities_labeled_wide <- densities_labeled %>%
+  pivot_wider(id_cols = c("acc_num"),
+              names_from = "variable_full", 
+              values_from = "log_density")
+
+df <- clinical_long %>%
+  filter(eclass2_ngs == "p53abn") %>%
+  select(acc_num, age_dx, grade_rev, hist_rev, stage_main, eclass2_ngs, neoadj, chemo, rt, brachy, outcome, status, time) %>%
+  unique %>%
+  # Add TIL clusters
+  inner_join(clust_assignments_map_comb_outcomes) %>%
+  # Add TIL densities
+  inner_join(log_densities_labeled_wide)
+
+dat <- df %>%
+  filter(outcome == "os",
+         !is.na(mac_pdl1neg_ido1pos_stroma))
+
+a <- coxph(Surv(time, status) ~ age_dx + chemo + rt + brachy + stage_main + tcyto_stroma,
+          data = dat)
+```
+
+# Key findings and discussion points
+
+## Findings 
+
+* Endometrial carcinoma TIL clusters
+* High TIL cluster is associated with improved outcomes
+  * These patients (in our study) comprise approx 50% of all p53abn
+  * This cluster is associated with higher PDL1 expression within antigen-presenting cells (specifically, CD68+ cells), and higher PD1+ expression in CD8+ T cells
+    * These are therapeutic targets
+  * This cluster is also associated with higher CD8/Treg ratio intratumourally, and a higher intratumoural/stromal ratio of CD8+ TILs specifically [compared to the low TIL cluster, and to other TIL types]
+* IDO1+ macs are present at similar levels in both high and low TIL tumours
+  * Could this be a therapeutic target in low TIL tumours, which do worse? 
+    * Following passage from Passarelli seems to support this too: "Moreover, almost all tumors expressing PD-L1 coexpress IDO (not specified if IDO1 or IDO2 as well), but more than half of tumor-expressing IDO lacks PD-L1 expression, suggesting that IDO-expressing tumors are significantly more common than PD-L1–expressing ones (35). Thus, combination therapy might be of clinical utility in this scenario."
+    * IDO1 expression is upregulated due to IFNG signalling in hot tumours, but what about the cold tumours that 'constitutively' express IDO1 (a term used in the literature)
+      * Indeed, in melanoma, epacadostat didn't work well -- reason may be related to the lack of selection for these constitutive cold tumours as opposed to the tumours that express IDO1 due to adaptive reasons (i.e. IFNG signalling)
+  * IDO1 mechanisms of immune suppression:
+    * depletion of tryptophan for CD8+ T cells
+    * production of kyurenine, of which the derivatives induce Treg differentiation
+  * "The gene expression data obtained from the TCGA database and immunolabeled samples show that the carcinomas of the cervix, followed by the endometrium, bladder, kidney, and lung, are the highest IDO1-expressing carcinomas." (Passarelli 2022) => useful target that is widely expressed in EC? 
+  * "Stromal expression of IDO1 is usually observed in tumors rich in immune infiltrates, such as TILs. Because IDO1 transcription is strongly induced by IFN-γ, the IDO1 expression in inflamed TME likely results from IFN-γ produced by TILs. Consistently, the transcriptomic analysis reported a strong correlation between CD8+ T-cell infiltration and IDO1 expression in tumor models, such as melanoma. This is similar to CD274 (the gene encoding PD-L1), which is also inducible by IFN-γ, whose expression is also correlated with TILs." (Passarelli) => explains why IDO1+ cell density is overall correlated with TIL density; however IDO1 is the best potential target from our study for the cold tumours
+
+* RUBY trial slides Spence sent me -> anti-PD1 (dostarlimab) useful not only in MMRd but perhaps also p53abn EC, along with a much smaller difference in NSMP, unlike HGSC which does not have much response 
+
+Why might ICB work in EC but not HGSC? 
+"Endometrial cancer is known to express high levels of both PD-1 (75% expression) and PD-L1 (25%–100% expression), with the highest levels observed among gynecologic cancers." (Yang 2023)
+
+Current understanding of when to use immunotherapy in EC:
+"The IDO1 expression in EC spans the four molecular subtypes, with higher levels in dMMR tumors, particularly Lynch syndrome–associated EC, and the POLE subtype (35, 60–63). However, it remains common in mismatch repair–intact tumors, a group for which immunotherapy is not currently considered a viable option. Therefore, IDO1 targeting can be also effective in tumors without abnormalities in the mismatch repair system, although further research is warranted (35)." (Passarelli) => this could entirely change with our results
+
+"TIL-low tumors were more prevalent in p53 abn and p53 wt endometrial cancers, but were also observed in the MMRd and POLE subtypes." (Yang 2023)
+
+HER2 in EC:
+"HER2 status was recently assessed retrospectively in PORTEC-3 cases and showed that 25% of the p53 abn molecular subtype was HER2 positive (moderate or strong HER2 IHC staining with confirmation of amplification on dual in situ hybridization)."
+
+The angio stuff loosely relates to:
+* "Lenvatinib is a selective inhibitor of VEGF-α, KIT, and RET and is a potent angiogenesis inhibitor. It has also been shown to be an effective immunomodulator. Lenvatinib decreases tumor-associated macrophages, increases T-cell population, upregulates the type I IFN signaling pathway, and leads to the activation of CD8+ T cells. In 2019, the FDA granted accelerated approval for the combination therapy of lenvatinib and pembrolizumab for the treatment of advanced non–MSI-H and non-dMMR EC that has progressed following prior therapy, according to substantial activity in phase Ib/II KEYNOTE-146/Study 111 (5). Later, in a randomized phase III trial (KEYNOTE-775/Study 309), lenvatinib plus pembrolizumab led to significantly longer progression-free survival and overall survival than chemotherapy among patients with advanced EC who had received one or two previous platinum-based chemotherapy regimens (47). To verify whether pembrolizumab plus lenvatinib is superior to chemotherapy in terms of progression-free survival and overall survival in patients with mismatch repair-proficient tumors and all patients even in the first line, the ENGOT-en9/LEAP-001 trial is currently ongoing (48). This trial has the potential to define the new standard of first-line treatment in advanced EC." (Passarelli)
+
+"The MITO END-2 trial investigated the efficacy of carboplatin, paclitaxel, and bevacizumab (Avastin, Roche) compared with chemotherapy alone in 108 patients with advanced or recurrent endometrial cancer. The addition of bevacizumab did not lead to a significant improvement in PFS, but it did result in a significant increase in the 6-month disease control rate (70.4% vs 90.7%).149 A post-hoc analysis showed that women with TP53 mutant endometrial cancer had improved PFS and overall survival when treated with bevacizumab and chemotherapy, whereas women with TP53 wt tumors showed no difference in outcomes.150 The authors suggested that p53 status could serve as a biomarker to predict patients with endometrial cancer who are more likely to respond to bevacizumab treatment." (Yang)
+
+
+PORTEC-3 trial results for p53abn https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7613653/
+
+
+
+## Treatment strategies for p53abn EC
+
+* Surgery + chemoradiotherapy (PORTEC-3)
+* +/- PARPi based on results of recent studies
+* current studies are ongoing to assess ICB + PARPi combination therapy
+* anti-VEGF may improve outcomes (see MITO END-2 trial results)
+* anti-HER2 may improve outcomes
+
+## Limitations
+
+* 2 cores for most samples; may miss spatial heterogeneity in immune response, which has been extensively demonstrated in other cancer types like HGSC (look also for relevant papers in EC)
 
