@@ -713,7 +713,125 @@ ggplot(cox_hazards_renamed, aes(y=variable, group=outcome, colour=outcome)) +
 
 # Exploratory
 
-## Three immune clusters
+## Mutational signatures
+
+
+```{r}
+cnsig_dir <- here::here("data", "raw", "huntsman_cn_signatures", "OneDrive_1_9-18-2023")
+
+cnsig_exposures_file <- file.path(cnsig_dir, "agglomerated_exposures_table.csv")
+gene_files <- file.path(cnsig_dir, paste0(c("BRCA1", "BRCA2", "CCNE1", "HER2", "TP53"), ".csv"))
+gene_mutation_files <- file.path(cnsig_dir, paste0(c("BRCA1", "BRCA2"), "_targeted_panel_seq.csv"))
+ploidy_cellularity_file <- file.path(cnsig_dir, "30kb_aCNsolutions_20230722_196_filtered.csv")
+her2_ihc_file <- file.path(cnsig_dir, "HER2_IHC_Track.xlsx")
+
+cnsig_exposures <- read_csv(cnsig_exposures_file)
+colnames(cnsig_exposures)[1] <- "sample"
+cnsig_exposures <- cnsig_exposures %>% 
+  filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
+  mutate(sample = str_replace_all(sample, "\\.", "-")) %>%
+  mutate(id = case_when(
+    str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
+    str_detect(sample, "^CC") ~  str_replace(sample, "\\-T$", ""),
+    str_detect(sample, "^VOA") ~ str_replace(sample, "[A-Z]*$", "")
+  ))
+
+gene_cn_status <- lapply(gene_files, function(x) {
+  read_csv(x)
+}) %>% bind_rows() %>% 
+  filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
+  mutate(sample = str_replace_all(sample, "\\.", "-")) %>%
+  mutate(id = case_when(
+    str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
+    str_detect(sample, "^CC") ~  str_replace(sample, "\\-T$", ""),
+    str_detect(sample, "^VOA") ~ str_replace(sample, "[A-Z]*$", "")
+  )) %>%
+  mutate(classification = factor(classification, levels = c("High Amplification", "Amplification", "Gain", "Normal", "Loss", "No Data")))
+
+gene_mut_status <- lapply(gene_mutation_files, function(x) {
+  read_csv(x)
+}) %>% bind_rows() %>% 
+  filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
+  mutate(sample = str_replace_all(sample, "\\.", "-")) %>%
+  mutate(id = case_when(
+    str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
+    str_detect(sample, "^CC") ~  str_replace(sample, "\\-T$", ""),
+    str_detect(sample, "^VOA") ~ str_replace(sample, "[A-Z]*$", "")
+  )) %>%
+  mutate(classification = factor(classification, levels = c("Present", "Absent", "No Data")))
+
+ploidy_cellularity <- read_csv(ploidy_cellularity_file) %>%
+  filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
+  mutate(sample = str_replace_all(sample, "\\.", "-")) %>%
+  mutate(id = case_when(
+    str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
+    str_detect(sample, "^CC") ~  str_replace(sample, "\\-T$", ""),
+    str_detect(sample, "^VOA") ~ str_replace(sample, "[A-Z]*$", "")
+  ))
+
+her2_ihc <- read_xlsx(her2_ihc_file) %>%
+  rename(sample=samples_id, her2_ihc=`IHC score`, her2_percent_pos=`% when 2 /3+`) %>%
+  filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
+  mutate(id = case_when(
+    str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
+    str_detect(sample, "^CC") ~  str_replace(sample, "\\-T$", ""),
+    str_detect(sample, "^VOA") ~ str_replace(sample, "[A-Z]*$", "")
+  )) %>%
+  mutate(her2_ihc = factor(her2_ihc, levels = c(0, 1, 2, 3))) %>%
+  select(sample, id, her2_ihc, her2_percent_pos)
+
+correct_identifiers <- clinical_data_unique %>%
+  select(patient_id, study_id, acc_num) 
+
+## Fix seemingly arbitrary identifier usage made by collaborators
+merge_on_all_identifiers <- function(df, identifiers) {
+  identifiers_subset <- identifiers %>%
+    filter(patient_id %in% df$id | study_id %in% df$id | acc_num %in% df$id) %>%
+    mutate(id = case_when(
+      patient_id %in% df$id ~ patient_id,
+      study_id %in% df$id ~ study_id,
+      acc_num %in% df$id ~ acc_num
+    ))
+  
+  df <- df %>%
+    inner_join(identifiers_subset) %>%
+    select(-c(sample, id)) %>%
+    select(patient_id, study_id, acc_num, everything())
+  
+  return(df)
+}
+
+
+cnsig_exposures <- merge_on_all_identifiers(cnsig_exposures, correct_identifiers)
+gene_cnvs <- merge_on_all_identifiers(gene_cn_status, correct_identifiers)
+gene_muts <- merge_on_all_identifiers(gene_mut_status, correct_identifiers)
+ploidy_cellularity <- merge_on_all_identifiers(ploidy_cellularity, correct_identifiers)
+her2_ihc <- merge_on_all_identifiers(her2_ihc, correct_identifiers) 
+```
+
+
+```{r, fig.width = 12, fig.height = 12}
+df <- cnsig_exposures %>% 
+  inner_join(overall_annotations_comb_tma)
+
+df_long <- df %>% 
+  pivot_longer(cols = colnames(df)[str_detect(colnames(df), "^(VS|BS)")],
+               names_to = "signature", 
+               values_to = "exposure") %>%
+  unique %>%
+  filter(!is.na(clust_map))
+
+ggplot(df_long, aes(x=clust_map, y=exposure)) + 
+  geom_boxplot(aes(fill=clust_map), alpha = 0.4, width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
+  theme_pubr() + 
+  scale_fill_manual(values = tilclust_color_map) + 
+  facet_wrap(~ signature, scales = "free_y", ncol = 3) +
+  stat_compare_means(vjust = 0.7, size = 3) + 
+  stat_compare_means(comparisons = list(c("0", "1"), c("1", "2"), c("0", "2")))
+```
+
+
 
 ## Vessel density 
 

@@ -1,0 +1,552 @@
+---
+title: Immune infiltration in p53abn endometrial carcinomas
+author:
+  - name: Authors
+  #   corresponding: false
+  #   email: allenz@student.ubc.ca
+  #   roles: []
+  #   affiliations:
+  #     - UBC, VGH
+  # - name: Spencer Martin
+  #   corresponding: false
+  #   roles: []
+  #   affiliations:
+  #     - UBC, VGH
+  # - name: Lien Hoang
+  #   corresponding: true
+  #   roles: []
+  #   affiliations:
+  #     - VGH
+keywords:
+  - Endometrial cancer
+  - p53
+  - Immune
+abstract: |
+  TODO: Nice abstract
+plain-language-summary: |
+  Immune infiltration in p53abn endometrial carcinomas
+key-points:
+  - Point 1
+  - Point 2
+date: last-modified
+bibliography: references.bib
+citation:
+  container-title: Citation container
+number-sections: true
+---
+
+{{< include notebooks/_data.qmd >}}
+
+
+```{r, include=FALSE, echo=FALSE}
+library(rstatix)
+library(cowplot)
+
+included_samples <- metatable_full$acc_num %>% unique
+
+num_samples <- included_samples %>% length
+
+# Some samples are duplicated across multiple TMAs
+num_unique_cores <- metatable_full %>% nrow
+
+pct_chemo <- (table(metatable_full$Chemotherapy)/sum(table(metatable_full$Chemotherapy)))[["Yes"]]
+pct_chemo <- round(pct_chemo * 100, 1)
+
+clinical_annotations_comb_tma <- metatable_full %>%
+  select(acc_num, Grade, Histotype, Neoadjuvant, Subtype, Stage) %>%
+  unique %>%
+  left_join(clust_assignments_map)
+
+histotype_tilclust_table <- with(clinical_annotations_comb_tma, table(Histotype, clust_map))
+
+histotype_tilclust_fisherp <- histotype_tilclust_table %>% fisher.test
+histotype_tilclust_rowwise <- row_wise_fisher_test(histotype_tilclust_table, p.adjust.method = "holm")
+```
+
+## Introduction 
+
+Endometrial cancer is the second most common type of gynecologic malignancy worldwide and the most common gynecologic malignancy in North America [@Siegel2024]. Molecular classification has separated endometrial cancers into 4 prognostically distinct subtypes: POLE (polymerase epsilon-mutated), MMRd (mismatch repair-deficient), p53abn (p53 abnormal) and NSMP (no specific molecular profile, [@Getz2013; @Talhouk2015; @Talhouk2017; @Kommoss2018]. p53abn cancers, the worst prognostic subtype, comprise only 15% of all endometrial cancers but account for 50-70% of mortalities [@Talhouk2015; @LeonCastillo2020; @Jamieson2021; @Siegenthaler2022], with extrauterine involvement in over 50% of cases [@Kommoss2018; @Momeni2021]. Most patients recur within five years on standard-of-care carboplatin-paclitaxel chemotherapy with or without radiotherapy, highlighting the need for alternative therapeutic options [@LeonCastillo2020; @Ott2017; @Jamieson2021]. 
+
+Increased CD8+ cytotoxic T and CD4+ helper T tumor-infiltrating lymphocytes (TILs) are associated with longer overall and recurrence-free survival in endometrial cancer [@deJong2009], while immunosuppressive regulatory T cells are associated with shorter survival [@Willvonseder2021]. TILs are known to respond to and track tumor-associated antigens [@Wick2014] to eradicate cancer cells. In response, cancer cells activate immunosupressive pathways, including the immune checkpoint molecule programmed death-ligand 1 (PD-L1), to evade immune surveillance [@Chan2019]. Treatment with immune checkpoint inhibitors reactivates exhausted T cells and is particularly effective in tumors with many neoantigens due to high mutational burden [@Chan2019]. In endometrial cancer, POLE and MMRd tumors have over 10 times as many mutations as p53abn and NSMP tumors [@Getz2013] and correspondingly higher TIL densities [@Talhouk2019]. While systemic therapy is typically unnecessary in POLE cancers due to exceptionally favorable outcomes with hysterectomy alone, anti-PD1 immune-checkpoint inhibitors have demonstrated promising efficacy in advanced, recurrent, or persistent MMRd endometrial cancers after multiple lines of therapy [@Konstantinopoulos2019; @Antill2021]. 
+
+More recently, @Mirza2023 showed that the anti-PD1 antibody dostarlimab was associated with significantly improved outcomes not only in MMRd but also MMRp (MMR proficient, non-POLE) endometrial cancer when added to standard-of-care chemotherapy. While the benefit of dostarlimab in MMRp cancers was less than in MMRd cancers, subgroup analysis showed that the benefit in MMRp was driven by p53abn cases (ESMOMirza2023). These findings contrast to those observed in high-grade serous ovarian cancer (HGSC), a p53-mutated gynecologic cancer with similar histologic and genomic characteristics to p53abn endometrial cancer [@Getz2013], where despite well-documented correlations between TIL and prolonged survival [@Zhang2003; @Nielsen2012; @Kroeger2016] immune checkpoint inhibition has shown limited efficacy [@Homicsko2015; @Gaillard2016; @Matulonis2019]. The factors underlying this promising response to immune checkpoint inhibitors in p53abn endometrial cancer remain poorly understood. 
+
+<!-- Multivariate analysis showed that TILs were not significantly associated with survival independent of molecular subtype,  -->
+
+<!-- suggesting that molecular subtype had independent prognostic value in addition to TILs [@Talhouk2015; @Kommoss2018]. More recently, multivariate analysis showed that TILs were not independently associated with survival when molecular subtype was considered, suggesting that molecular subtype supercedes the prognostic relevance of TILs [@Talhouk2019; @Fan2023]. -->
+
+
+
+<!-- The mechanisms of immunogenicity in p53abn endometrial cancers are not well understood, however, one possibility is that genome instability in p53abn endometrial cancers may recruit TIL through cGAS-STING activation (@Bloom2023, @Woo2015). -->
+
+PARP inhibitors are another class of targeted therapies under investigation in p53abn endometrial cancer [@Bosse2022]. Spurred by remarkable clinical responses in HGSC [@Moore2018], PARP inhibitors have become standard-of-care in *BRCA1*/*BRCA2*-mutated or homologous recombination deficient cancers across multiple cancer types [@Friedlander2023]. Compared to HGSC, HRD is less common in p53abn endometrial cancer, with approximately 25% of cases showing evidence of HRD and fewer than 5% with *BRCA* mutations [@Wallbillich2020]. In HGSC, HRD tumors have higher immunogenicity than non-HRD tumors, and markers of adaptive immunity are associated with longer overall survival in HRD but not non-HRD tumors [@Zhang2018]. Understanding the relationship between HRD and the immune microenvironment in p53abn endometrial cancers may help inform combination PARP inhibitor and immunotherapy clinical trials [@Konstantinopoulos2022]. 
+
+
+To understand the clinical relevance of TILs in p53abn endometrial cancer, we systematically profiled the immune microenvironment of `r num_samples` clinically annotated p53abn endometrial cancers with multiplex immunofluorescence. We evaluated the expression patterns of PD1, PDL1 and IDO1, three pharmacologically actionable immunosuppressive molecules with translational relevance to current clinical trials in endometrial cancer. Finally, we investigated the relationship between TILs, homologous recombination deficiency, and HER2 in p53abn endometrial cancer. 
+
+
+
+<!-- may aid interpretability of ICB and parpi trials (i.e. RAINBO-RED for parpi)  -->
+
+
+
+
+<!-- Dostarlimab (anti-PD1) approved for progressed/recurrent MMRd EC in 2021 -->
+<!-- There are ongoing trials for ICB in p53abn EC -->
+
+<!-- Inhibitory factors on immune response include Wnt/beta catenin and PI3K pathways (that are more common in NSMP/p53wt tumors) -->
+
+<!-- Motivated by the success of maintenance PARPi in HGSOC, raises the possibility of PARPi in p53abn ECs, which commonly show similar histology to their adnexal counterparts. In HGSOC, HRD tumors are associated with good outcomes which correlates with TIL, suggesting that HRD may generate neoantigens inducing an immune permissive microenvironment. While BRCA1 and BRCA2 mutations are infrequent in uterine serous carcinoma (@Getz2013), non-BRCA HRD mutations are present at similar frequencies in uterine serous and HGSOC (@Wallbillich2020), with HRD in up to 25% of p53abn EC overall (@Yang2024). This motivated RAINBO-RED for p53abn EC, investigating addition of olaparib to chemoradiotherapy alone.  -->
+<!-- If HRD is prognostically favourable, might expect higher TIL => how does HRD relate to TIL in p53abn EC? -->
+<!-- Previous reports of frequency of germline BRCA1/BRCA2 mutations is controversial (@Jamieson2021) -->
+<!-- There are other reports of even up to 15% somatic BRCA/BRCA2 in patients with advanced/recurrent endometrial ca (not specific to p53abn or serous) @Jamieson2021 -->
+
+<!-- Thus we sought to ... We analyze the largest-to-date cohort of p53abn EC (n=XXX) to interrogate the relationship between TIL and clinical outcomes in p53abn EC. We also profiled immune checkpoint markers to inform immunotherapeutic strategies (potentially as both treatment options and biomarkers of response).  -->
+
+
+
+<!-- Endometrial cancer is the second most common type gynecologic cancer worldwide and the most common gynecologic malignancy in North America, and is increasing in incidence.  -->
+<!-- Molecular subtyping has identified a subset of endometrial carcinomas, defined by p53 mutations and widespread copy number aberrations (@Getz2013), that have the worst prognosis (@Talhouk2015, @LeonCastillo2020, @Siegenthaler2022) and account for >50% of the mortality with the most abdominal and distant metastases of any molecular subtype (@Siegenthaler2022) while only being ~15% of ECs.  -->
+<!-- In accordance with their aggressive behaviour, p53abn ECs are staged as a minimum of IC according to the 2023 FIGO staging of endometrial cancer.  -->
+<!-- First line treatment for p53abn EC is surgical resection followed by carboplatin and paclitaxel chemotherapy with or without radiotherapy, with modest response rates, less than the ovarian/FT counterpart (HGSC) (@Ott2017) and poor long-term outcomes (CITE, use a reference from Mirza2023).  -->
+<!-- Other therapeutic options need to be explored, including immunotherapy, PARPi, HER2 inhibitors, Wee1 inhibitors, anti-angiogenic therapy, ... (@Jamieson2021) -->
+
+<!-- TILs are associated with superior outcomes in EC (@deJong2009) -->
+<!-- In EC as a whole TIL are also associated with superior outcomes  -->
+<!-- However, in EC @Talhouk2019 analyzed a cohort of 460 ECs including 111 p53abn ECs and described molecular subtype and not TILs as driving outcomes -->
+<!-- - back then, it was unclear whether p53abn or NSMP would respond to checkpoint blockade -->
+<!-- - with the effect of molecular subtype outweighing any prognostic association with TIL, TIL were largely thought of as unimportant in EC -->
+
+
+<!-- Some studies have challenged these results, showing prognostic value of TIL in high-grade endometrial carcinomas (@Fan2023) or independent of histotype (@Miyamoto2021) and molecular subtype (@Horeweg2020) -->
+
+<!-- p53abn EC shares many molecular and clinical features with HGSC (@Getz2013) -->
+<!-- @Fan2023 also similarly reported no statistically significant difference in MMRd and MMRp groups as a whole. However, we know that distribution of molecular subgroups varies between molecular subtypes (e.g. NSMP has the least number of TIL-high samples, and does better than p53abn, so that probably reduces their power to detect trends in p53abn) -->
+<!-- @Horeweg2020 analyzed ECs including 47 p53abn cases and reported a significant association of intraepithelial CD8+ density with recurrence-free survival when analysis was stratified by molecular subtype (they also reported it in NSMP, but that barely reached significance. They specifically mentioned the contrasting results with @Talhouk2019), but not in MMRd group -->
+<!-- - may explain MMRd's benefit from ICB regardless of PDL1 status/TIL densities  -->
+<!-- - but raises possibility of TIL being a biomarker of ICB response in p53abn EC -->
+
+<!-- ICB is being explored as treatment option in advanced stage/recurrent EC. -->
+<!-- Initial studies of PD-1 and PD-L1 inhibitors reported a wide range of response rates in EC -->
+<!-- Most consistent success in MMRd -->
+<!-- MMRd is where majority of focus has been, due to high neoantigen load due to MMR deficiency -->
+<!-- especially in MMRd, where pembrolizumab received tissue-agnostic approval in 2017 (@Konstantinopoulos2019) -->
+<!-- Overall approx half of MMRd respond to PD-1/PD-L1 blockade (@Yang2024) -->
+<!-- GARNET trial (CITE) showed durable responses to dostarlimab in MMRp tumors too, which was recapitulated in the RUBY trial (@Mirza2023) -->
+<!-- @Mirza2023 (NEJM): RUBY trial showing MMRd benefit from addition of anti-PD1 dostarlimab to ... -->
+<!-- p53 abnormalities also cause widespread genomic instability (@Getz2013) is associated with TIL in endometrial carcinoma (@Bloom2023), possibly through neoantigen generation -->
+<!-- Also p53abn => DNA damage => cGAS-STING activation => immunologically permissive microenvironment.  -->
+<!-- Over half of p53abn ECs are TIL-high (@Talhouk2019), as opposed to approximately one-third of p53wt EC -->
+<!-- @MirzaESMO2023 (ESMO presentation): Subgroup analyses by molecular subtype from RUBY trial showing that TP53-mutated tumors also benefit substantially from addition of dostarlimab, moreso than NSMP. These findings are surprising in the context of poor ICB response in HGSOC and lack of TIL correlation with survival in @Talhouk2019 -->
+<!-- Adjuvant ICB is already being offered in some centers for advanced stage EC (@Tubridy2024) -->
+<!-- Also, there will be a need for biomarkers of response to ICB in p53abn EC. PDL1 expression initially explored as one such option in all-comer study of advanced stage EC (@Ott2017 -- KEYNOTE-028, pembrolizumab ORR 13.0%), but avelumab had promising activity in MMRd EC regardless of PDL1 expression (@Konstantinopoulos2019) -- still remains to be shown if also true for p53abn EC. Given that no TIL patterns are exclusive to any molecular subtype -- is ICB effective in p53abn and NSMP tumors? TIL-rich and TIL-poor tumors have been demonstrated in all subtypes of EC except for POLE tumors, suggesting that biomarkers of immunotherapy response are needed (@Talhouk2019).  -->
+
+<!-- with a marker of responsiveness to PARP inhibitors (@Goode2019). While *BRCA1* and *BRCA2* mutations are comparatively rare in endometrial cancer, mutations in non-*BRCA* HRD-associated genes are present at similar frequencies in endometrial serous carcinoma and high-grade serous ovarian cancer (@Wallbillich2020). Overall, up to 25% of p53abn endometrial cancers are homologous recombination-deficient (@Yang2024), motivating the RAINBO-RED trial of olaparib in addition to chemoradiotherapy for p53abn endometrial cancer.  -->
+
+
+
+
+
+## Methods {#sec-methods}
+
+### Data acquisition
+
+#### Sample acquisition
+
+Ethics approval for this study was obtained from the University of British Columbia (UBC) Research Ethics Board (REB NUMBERS). The cohort consisted of `r num_samples` treatment-naive p53-abnormal endometrial carcinomas collected between XXXX and XXXX in Vancouver and in the Cross Canada endometrial cancer cohort. CONSENT? Clinicopathologic and outcome data were collected by chart review. 
+
+### Experimental methods
+
+#### Tissue microarray construction
+
+Representative samples of endometrial carcinomas from our Vancouver cohort were cored (0.6 mm) in duplicate and arrayed as described previously (@Talhouk2015). CROSS CANADA COHORT? TMAs were cut at WHAT thickness for immunofluorescence. 
+
+#### Multiplex immunofluorescence
+
+TODO. 
+
+### Computational analysis
+
+#### Cell and region counting
+
+<!-- Project: SOW102 (B&T HALO) -->
+<!-- Date completed: 01-Dec-22 -->
+<!-- Slides analyzed: 22-004 -->
+<!-- images/cores/ROIs: 464 -->
+<!-- HALO modules+versions used: Random Forest V2; HighPlex FL v4.1.3 -->
+<!-- HALO version used: v3.5.3 -->
+<!-- Completed by: Anna Brisland -->
+
+<!-- Image segmentation Method: TMA -->
+
+Two multiplex immunofluorescence panels to classify TIL types (CD3, CD8, FOXP3, CD20, CD79a) and quantify immunosuppressive markers (PD1, PDL1, IDO1, CD8, CD68) were performed on each tissue microarray. For each immunofluorescence panel, 3 tissue segmentation and cell phenotyping algorithms were trained in HALO using 10 representative images for each algorithm. Regions were classified as epithelial, stromal, glass, or other (including necrosis) for tissue segmentation. The mean and standard deviation across all algorithms was calculated for each core, and any cores with a standard deviation of >5 were flagged for manual review by a pathology resident (SM). Final epithelial and stromal areas were calculated by subtracting glass and other areas from tissue area.  
+
+Phenotypes were defined according to combinations of positive and negative markers in each cell. Cytotoxic T cells were defined by positivity for both CD3 and CD8, helper T cells by positivity for CD3 and negativity for CD8 and FOXP3, regulatory T cells by CD3 and FOXP3 positivity with CD8 negativity, B cells by positivity for both CD20 and CD79a, and plasma cells by CD79a positivity in the absence of CD20. Cells were classified according to cytoplasmic and/or nuclear positivity for each marker. Each phenotype was scored independently by 3 algorithms, and averages across all algorithms were calcualted separately for epithelial and stromal regions. Standard deviations across algorithms of >5 were flagged for manual review by a technologist and pathology resident (SM). All immune cells touching tumor cells were considered epithelial. 
+
+#### Mixture modeling of cell counts
+
+TIL count $y_{i,c,r}$ for a given core $i$, cell type $t$, and region (tumour/stroma) $r$ were described as follows:
+
+$$
+y_{i,t,r} \sim \mathcal{NB}(\mu_{i,t,r}, \alpha_{i,t,r})
+$$
+where the mean $\mu_{i,t,r}$ follows:
+
+$$
+\begin{aligned}
+\mu_{i,t,r} &= A_{i,r} z_{c_i,t,r} \\
+z_{c,t,r} &\sim \mathcal{Gamma}(\bar{\mu}_{t,r}, 100)
+\end{aligned}
+$$
+where $c_i$ is the inferred cluster of core $i$, $A_{i,r}$ is the area of region $r$ in core $i$, and $\bar{\mu}_{t,r}$ is the mean density (count divided by area) value across all cores $i$. The Gamma distribution was parametrized in terms of a mean and scale parameter, with the scale parameter set to 100 to allow for a fairly uninformed prior. 
+
+To reduce the dimensionality of the parameter space, the dispersion parameter $\alpha_{i,t,r}$ was formulated semi-parametrically in terms of a set of Gaussian radial-basis kernels with parameters $a_k$ and $b_k$, for a specified number of centers $\bar{y}_k$ uniformly distributed between 0 and the maximum number of counts [@Kapourani2016; @Zhang2019], with the default number of centers set equal to 20: 
+
+$$
+\begin{aligned}
+\alpha_{i,t,r} &= \sum_k a_k \exp(-b_k (z_{c_i,t,r} - \bar{y}_k)^2) \\
+a_k &\sim \mathcal{Lognormal}(0, 1) \\
+b_k &\sim \mathcal{Lognormal}(0, 1)
+\end{aligned}
+$$
+
+where $a_k$ and $b_k$ follow relatively agnostic lognormal priors as above. 
+
+
+```{tikz, echo = FALSE}
+#| label: suppfig-bayesian-model
+\usetikzlibrary{bayesnet}
+\begin{tikzpicture}[x=1.7cm,y=1.8cm]
+
+    % Nodes
+  
+    \node[obs]                   (y)      {$y$} ; %
+    \node[latent, above=.4 of y]    (mu)      {$\mu$} ; %
+    \node[latent, left=.2 of y] (alpha) {$\alpha$} ;
+
+
+    \node[obs, left= .4 of mu] (A) {$A$} ;
+    \node[latent, above = .4 of mu] (z) {$z$} ;
+    \node[latent, right = 0.3 of mu] (clust) {$c$} ;
+
+  
+    \edge{mu} {alpha};
+    \edge{mu,alpha} {y};
+    \edge{A,z,clust} {mu} ;
+
+    
+    \plate {cluster} {(z)} {$C$} ;
+    \plate {region} {(A) (z) (mu) (y) (alpha) (cluster)} {$R$} ;
+    \plate {core} {(A) (mu) (alpha) (y) (clust) (region)} {$N$} ;
+  
+
+  
+  \end{tikzpicture}
+```
+
+Inference was performed in pymc v5.9.1 [@AbrilPla2023]. To determine the optimal number of clusters $|C|$, a Dirichlet process prior was first fitted to a version of the model marginalized over cluster membership $z$. At a minimum threshold of 0.05 for cluster proportion, two clusters with proportions of at least 0.05 were inferred (first cluster with mean proportion 0.588, 95% CI 0.512-0.656; second cluster with mean proportion 0.347, 95% CI 0.289-0.407). The lower bound of the 95% CI for the third most prevalent cluster was 0.004 (equivalent to 1 out of the 256 input samples), supporting the presence of only 2 clusters. Thus, the model was fitted with 2 clusters ($|C|=2$) to sample cluster membership $z$. 
+
+#### Statistical analysis
+
+All statistical analysis was performed in R (v4.3.2). The Mann-Whitney U test was used to evaluate significance in two-way comparisons. Comparisons for categorical count data were evaluated for significance with Fisher's exact test. Multiple testing correction was performed with the Holm method. Statistically significant results were considered those with *P* < 0.05.
+
+P values for Kaplan-Meier analyses were computed with log-rank tests. Cox proportional hazards analysis was performed in R with the survival package (v3.5-7). Proportional hazards assumptions were evaluated with weighted Schoenfeld residuals [@Grambsch1994]. Posterior distribution samples were used to calculate confidence intervals and *P* values.
+
+#### Code availability
+
+Code associated with this project is publicly available at [https://github.com/Irrationone/tfri_halo](https://github.com/Irrationone/tfri_halo). 
+
+## Results {#sec-results}
+
+### Cohort
+
+```{r, include = FALSE, echo = FALSE}
+histotype_counts <- metatable_full %>%
+  group_by(Histotype) %>%
+  summarise(num_acc=length(unique(acc_num)))
+```
+
+We assembled a cohort of `r num_samples` treatment-naive p53abn endometrial carcinomas diagnosed between XXXX and XXXX (@tbl-cohort-overview, OTHER REF) [@Talhouk2019]. All cancers were classified according to ProMisE [@Talhouk2015] by p53 and MMR immunohistochemistry in addition to next-generation sequencing for POLE and p53 mutations. Histotypes included were serous (n=`r with(histotype_counts, num_acc[Histotype == "serous"])`), endometrioid (n=`r with(histotype_counts, num_acc[Histotype == "endometrioid"])`), carcinosarcoma (n=`r with(histotype_counts, num_acc[Histotype == "carcinosarcoma (MMMT)"])`), clear cell (n=`r with(histotype_counts, num_acc[Histotype == "clear cell"])`), mixed (n=`r with(histotype_counts, num_acc[str_detect(Histotype, "mixed")])`), undifferentiated/dedifferentiated (n=`r with(histotype_counts, num_acc[str_detect(Histotype, "undiff")])`) and other (n=`r with(histotype_counts, num_acc[Histotype == "other"])`). All patients received treatment in accordance with standard-of-care at the time of diagnosis, with most patients receiving adjuvant chemotherapy and a smaller proportion receiving adjuvant brachytherapy or radiotherapy (@tbl-cohort-overview). No patients received immunotherapy. 
+
+{{< embed notebooks/cohort_analysis.qmd#tbl-cohort-overview >}}
+
+{{< embed notebooks/cohort_analysis.qmd#fig-cohort-track >}}
+
+We performed multiplex immunofluorescence and automated image analysis to segment tumors into epithelial (intratumoral) and stromal regions and quantify CD8+ T cells (CD3+CD8+), CD4+ T cells (CD3+CD8-FOXP3-), T regulatory cells (CD3+CD8-FOXP3+), B cells (CD20+CD79a+) and plasma cells (CD20-CD79a+)  (@sec-methods). Cells within epithelial and stromal regions were counted separately, and automated counts were manually verified. At least two TMA cores were sampled from each tumor to account for spatial heterogeneity. Sarcomatoid areas in carcinosarcomas were considered epithelial. Densities for all cell types in epithelial and stromal regions were highly correlated (@suppfig-densities-correlation). Representative H&E and immunofluorescence images with corresponding epithelial-stromal region segmentation and cell type identification results are shown in @fig-halo-images. 
+
+{{< embed notebooks/clustering.qmd#suppfig-densities-correlation >}}
+
+```{r, echo=FALSE}
+#| label: fig-halo-images
+p1 <- ggdraw() + draw_image("images/renamed/autofluorescence.png", scale = 0.9)
+p2 <- ggdraw() + draw_image("images/renamed/segmentation.png", scale = 0.9)
+p3 <- ggdraw() + draw_image("images/renamed/noanalysis.png", scale = 0.9)
+p4 <- ggdraw() + draw_image("images/renamed/cells.png", scale = 0.9)
+
+plot_grid(p1, p2, p3, p4, nrow = 2, ncol = 2, labels = "auto")
+```
+
+
+### TIL-rich tumors are associated with longer survival
+
+```{r, include = FALSE, echo = FALSE}
+angio_summarized_comb_tma <- angio_long %>%
+  group_by(acc_num, panel, variable) %>%
+  summarise(
+    value=sum(value)
+  ) %>%
+  ungroup()
+
+areas_clust <- angio_summarized_comb_tma %>%
+  select(-c(panel)) %>%
+  pivot_wider(names_from = "variable", values_from = "value") %>%
+  mutate(
+    frac_vessel_stroma=area_vessel_mm/(area_stroma_mm+area_vessel_mm),
+    frac_vessel_all=area_vessel_mm/(area_stroma_mm+area_vessel_mm+area_tumour_mm)
+  ) %>%
+  inner_join(clust_assignments_map) %>%
+  filter(acc_num %in% included_samples)
+
+stroma_area_pval <- pval_string(wilcox.test(area_stroma_mm/(area_stroma_mm + area_tumour_mm) ~ clust_map, data = areas_clust)$p.value, format = "scientific", digits = 3)
+
+vessel_area_pval <- pval_string(wilcox.test(frac_vessel_stroma ~ clust_map, data = areas_clust)$p.value, format = "exact", digits = 3)
+```
+
+Next, we clustered tumors based on epithelial and stromal counts normalized by region area with a negative binomial mixture model. The optimal number of clusters, as determined by a Dirichlet process prior, was two: a TIL-rich and a TIL-poor cluster (@sec-methods). TIL-rich tumors were highly infiltrated by both epithelial and stromal T and B cells, including CD3+CD8+ cytotoxic T cells, CD3+CD8-FOXP3- T helper cells, CD3+CD8-FOXP3+ T regulatory cells, CD79a+CD20+ B cells, and CD79a+CD20- plasma cells. TIL-rich tumors had more stroma than TIL-poor tumors (*P = *`r stroma_area_pval`). Vascular density was similar in TIL-rich and TIL-poor tumors (*P = *`r vessel_area_pval`). Contrary to observations in high-grade serous ovarian carcinoma, where tumors with both epithelial and stromal TIL are an immunologically and genomically distinct subgroup from those with stroma-restricted TIL [@Zhang2018], we were not able to identify a distinct subgroup of p53abn endometrial cancers with stroma-restricted TIL. However, TIL-rich tumors had significantly higher epithelial but not stromal CD8/Treg ratios, suggestive of tumor-specific T cell activation (@fig-densities-tilclust) [@deJong2009; @Yamagami2011]. 
+
+```{r, include = FALSE, echo = FALSE}
+library(survival)
+library(survminer)
+
+unique_outcomes <- c("os", "pfs", "dss")
+
+overall_km_fits <- lapply(unique_outcomes, function(x) {
+  df <- clinical_long_clust_assignments %>% filter(outcome == x)
+  fit <- survfit(Surv(time, status) ~ clust_map, 
+                 data = df)
+  plot <- ggsurvplot(fit,
+                     data = df,
+                     pval = TRUE,
+                     pval.method = TRUE,
+                     conf.int = TRUE,
+                     risk.table = TRUE, 
+                     ggtheme = theme_pubr())
+  pval <- surv_pvalue(fit, data = df)
+  return(list(fit=fit, plot=plot$plot, pval=pval))
+})
+
+min_lrpval <- pval_string(min(sapply(overall_km_fits, function(x) x$pval$pval)), format = "exact", digits = 3)
+```
+
+We next assessed whether TIL subgroup was associated with survival. In univariate Kaplan-Meier analyses, there was no significant association between TIL cluster and overall, progression-free, or disease-specific survival (all *P > *`r min_lrpval`). However, TIL cluster was significantly associated with prolonged overall and disease-specific survival in multivariate Cox proportional-hazards analysis accounting for age at diagnosis, FIGO stage [@Creasman2009], and adjuvant treatment (@tbl-cox-hazards). TIL cluster was also associated with longer progression-free survival, but this was not statistically significant (P = `r pval_string(summary(cox_fits$pfs)$coefficients["TILHigh TIL", "Pr(>|z|)"])`). Age was associated with shorter overall survival. None of the adjuvant treatment modalities tested were significantly associated with longer survival. The discordance in the effect of TIL between univariate and multivariate analyses was at least partially explained by differences between limited and advanced stage disease. Univariate Kaplan-Meier analyses stratified by stage highlighted that the association between TIL cluster and survival was most pronounced in patients with stage III disease (@suppfig-km-stage). Neither TIL subgroup nor individual TIL densities were correlated with HER2 status by immunohistochemistry or shallow whole-genome sequencing. Thus, TILs are associated with longer survival in p53abn endometrial carcinoma. 
+
+<!-- The prognostic value of histotype in p53abn endometrial carcinomas is controversial. In particular, some studies have shown that carcinosarcomas behave more aggressively than serous carcinomas (@Zhang2015, @Bernardini2016, @Raffone2022), while other studies have shown comparable outcomes (@Song2011, CITE -- Jessica mentioned this in one of the TFRI meetings, but I don't have the ref). -->
+
+```{r, include = FALSE, echo = FALSE}
+cs_pval <- with(histotype_tilclust_rowwise, p.adj[group == "carcinosarcoma (MMMT)"])
+
+histotype_tilclust_counts <- histotype_tilclust_table %>% as.data.frame.table
+
+cs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype == "carcinosarcoma (MMMT)", clust_map == "Low TIL"))$Freq
+cs_total_count <- (histotype_tilclust_counts %>% filter(Histotype == "carcinosarcoma (MMMT)"))$Freq %>% sum
+
+noncs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype != "carcinosarcoma (MMMT)", clust_map == "Low TIL"))$Freq %>% sum
+noncs_total_count <- (histotype_tilclust_counts %>% filter(Histotype != "carcinosarcoma (MMMT)"))$Freq %>% sum
+
+max_csfit_til_pval <- sapply(cox_fits_cs[c("os")], function(x) {
+  summary(x)$coefficients["TILHigh TIL","Pr(>|z|)"]
+}) %>% max
+
+min_csfit_cs_pval <- sapply(cox_fits_cs, function(x) {
+  summary(x)$coefficients["CarcinosarcomaTRUE","Pr(>|z|)"]
+}) %>% min
+```
+
+As p53abn endometrial carcinomas represent a mixture of different histotypes, we investigated whether histotype modifies the association between TIL and survival. TIL subgroup was significantly associated with histotype (P = `r pval_string(histotype_tilclust_fisherp$p.value, format = "scientific", digits = 3)`), with most carcinosarcomas falling in the TIL-poor group (`r cs_lowtil_count`/`r cs_total_count`), compared to `r noncs_lowtil_count`/`r noncs_total_count` of non-carcinosarcoma histotypes (adjusted P = `r pval_string(cs_pval)`). Other non-serous histotypes were not significantly associated with histotype. To account for the differences in immune composition between carcinosarcomas and other p53abn endometrial cancer histotypes, we included carcinosarcoma as an explanatory variable in our multivariate analysis. The association between TIL subgroup and overall survival remained significant (P = `r pval_string(max_csfit_til_pval)`), suggesting that TIL subgroup is prognostic independently of histotype. Carcinosarcomas were associated with shorter overall, progression-free and disease-specific survival, consistent with prior findings [@Zhang2015; @Bernardini2016; @Raffone2022], but this was not statistically significant (all P > `r pval_string(min_csfit_cs_pval)`). 
+
+<!-- Note our findings also recapitulate benefit of adding adjuvant chemotherapy to p53abn EC [@LeonCastillo2020].  -->
+
+<!-- Citations to build support around: -->
+
+<!-- @Horeweg2022 reported that the presence of >=1 tertiary lymphoid structure is associated with longer recurrence-free survival, especially in MMRd tumors, but with a lesser effect in p53abn tumors -->
+
+<!-- The article that Spence had about how p53abn subgroup analysis in that trial showed benefit -->
+
+
+<!-- {{< embed notebooks/clustering.qmd#suppfig-densities-stage >}} -->
+
+<!-- Carcinosarcomas have slightly higher incidence of HER2 amp/HLAMP (as documented in literature) -->
+
+
+{{< embed notebooks/clustering.qmd#fig-densities-tilclust >}}
+
+
+{{< embed notebooks/clustering.qmd#tbl-cox-hazards >}}
+
+
+{{< embed notebooks/clustering.qmd#suppfig-km-stage >}}
+
+
+<!-- While vessel density may appear to correlate with immune cluster, note that this difference vanishes after correcting for tumour content. In other words, samples with lower epithelial area (i.e. higher stromal area) are associated with the high TIL cluster, which is associated with better outcomes.  -->
+
+
+### Overexpression of immune checkpoint molecules in TIL-rich samples
+
+Next, we profiled immune checkpoint expression to determine the extent of exhaustion within the tumor microenvironment. Consistent with our previous findings [@Talhouk2019], TIL-rich tumors contained more CD8+PD1+ and CD8+PD1- T cells (@fig-tilclust-ardensities). Additionally, there was relative enrichment of PD1+ cytotoxic T cells, suggestive of T cell exhaustion (@fig-tilclust-ardensities). 
+
+PDL1 is expressed by both tumor and immune cells, particularly macrophages, and binds to PD1 on T cells to suppress the immune response [@DiTucci2019]. Mirroring the pattern seen with PD1 in cytotoxic T cells, PDL1-positive macrophages were enriched in TIL-rich tumors  (@fig-tilclust-ardensities). In contrast, there was no significant difference in PDL1-negative macrophages between TIL-rich and TIL-poor tumors, irrespective of IDO1 status. Our results highlight upregulation of the PD1-PDL1 axis in TIL-rich p53-abnormal endometrial carcinomas which may be therapeutically exploitable with immune checkpoint blockade. 
+
+
+{{< embed notebooks/adaptive_response.qmd#fig-tilclust-ardensities >}}
+
+
+
+### Mutational signatures and TILs in endometrial cancer
+
+```{r, include = FALSE, echo = FALSE}
+num_mutsig_samples <- length(intersect(cnsig_exposures$acc_num, included_samples))
+```
+
+Finally, we evaluated the relationship between TIL subgroups and mutational processes. Using shallow whole genome sequencing data-derived copy number signatures that we previously described in endometrial cancer [CITE], we correlated signature exposures to TIL subgroup for n=`r num_mutsig_samples` p53abn endometrial carcinomas. None of the copy number signatures, including the HRD signature VS3 (CHECK WITH DAWN), were significantly associated with TIL subgroup in p53abn endometrial carcinoma. Densities for individual TIL types in epithelial and stromal regions were not significantly correlated with any mutational signature, and none of the mutational signature exposures were significantly associated with survival in multivariate Cox analyses including TIL cluster. Thus, mutational signatures show different patterns of co-segregation with TILs and prognostic significance in p53abn endometrial carcinoma compared to HGSC [@Zhang2018]. 
+
+
+{{< embed notebooks/mutational_signatures.qmd#fig-mutational-signatures >}}
+
+
+
+## Discussion
+
+<!-- THIS PARAGRAPH FEELS LIKE AN ABSTRACT -->
+<!-- While routine molecular subtyping has begun to advance risk stratification and therapeutic decision making in endometrial carcinoma, p53abn cancers remain difficult to treat despite the benefit of adjuvant chemotherapy and radiotherapy [CITE PORTEC-3 trial]. Targeted therapies, including HER2 and PARP inhibitors, may benefit a subset of cases, but only a minority of endometrial cancers harbor each target [@Momeni2021; OTHERS]. TILs, however, are present in all molecular subtypes of endometrial carcinoma including p53abn [@Talhouk2019], and immunotherapies augmenting native TIL responses have shown success in TIL-rich tumors across a variety of cancer types [CITE]. Initial promising results with immune-checkpoint blockade highlight the need for a better understanding of the immune microenvironment of p53abn endometrial cancers to identify patients most likely to benefit from treatment. -->
+
+
+Historically considered one of the less immunogenic subtypes of endometrial cancer, p53abn tumors have received minimal attention in immunotherapy research. 
+Initial trials showed only modest response rates to pembrolizumab in advanced and recurrent MMRp endometrial cancer [@Ott2017], mirroring similar results in epithelial ovarian cancer [@Matulonis2019]. 
+More recently, dostarlimab in addition to standard-of-care chemotherapy demonstrated benefit in both MMRd and MMRp cancers [@Mirza2023], with p53abn cases responding substantially better than NSMP cases [ESMOMirza2023]. 
+We systemically profiled the immune microenvironment in one of the largest cohorts of p53abn endometrial cancers to date, revealing 2 immunologically distinct subgroups defined by extensive and limited infiltration of T cells, B cells, and macrophages. 
+Over half of p53abn cancers are highly infiltrated by TIL, challenging the belief that p53abn cancers are immune depleted [@Mendiola2022]. 
+Cytotoxic T cells, but not immunosuppressive T regulatory cells, co-localized with tumor cells in TIL-rich tumors. 
+TIL-rich tumors expressed high levels of PD1 and PDL1, providing mechanistic rationale for the effectiveness of anti-PD1 inhibitors. 
+TIL-rich tumors were also associated with longer overall and disease-specific survival, in contrast to prior findings in smaller cohorts [@Talhouk2019]. 
+Notably, TILs were more strongly associated with survival in patients with advanced disease, who have the most presing treatment requirements. 
+These findings may inform clinical trials of immunotherapies in early-stage endometrial cancer (NCT04634877, NCT04214067), where TILs were not significantly associated with longer survival. 
+
+
+The pervasiveness of TIL-rich p53abn endometrial cancers underscores potential shortcomings of molecular subtype-based strategies for selecting patients for immunotherapy [@Ott2017; @Yamashita2017]. 
+While TIL-rich tumors are more frequent in MMRd (78% [@Talhouk2019]) than other subtypes, 53% of p53abn tumors in our study were also TIL-rich. 
+Histotype likely has limited importance, as apart from carcinosarcomas, which were mostly TIL-poor, histotype was not associated with TIL status. 
+NSMP, the most TIL-poor molecular subtype [@Talhouk2019; @ZhangTILsubtype2023], derived correspondingly limited benefit from dostarlimab in the RUBY trial [ESMOMirza2023]. 
+Thus, TIL response, not molecular subtype alone, may be more informative for stratifying endometrial cancer patients for immunotherapy. 
+
+<!-- MMRd cancers, with high tumor mutation burden and similar survival outcomes to NSMP cancers, have been the primary focus of immunotherapy research [@Ott2017; @Marabelle2020; @OMalley2022].  -->
+
+
+In our study, IDO1 expression was not associated with TIL-rich tumors, contrasting with PD1 and PDL1 expression patterns. 
+This may indicate a different mechanism for IDO1 induction in the tumor microenvironment. 
+While IDO1+ macrophages were less prevalent than PDL1+ macrophages, their presence irrespective of overall TIL infiltration may make IDO1 a suitable target for immunotherapy in a subset of TIL-poor tumors. 
+
+
+Our data show for the first time the relationship between immune response and mutational processes in p53abn endometrial cancer. 
+Despite genomic similarities between HGSC and p53abn endometrial cancer [@Getz2013; @Zhang2018], TILs were not correlated with mutational signatures, including HRD, in p53abn endometrial cancer. 
+In contrast to HGSC, p53abn endometrial cancer may elicit TIL responses through mechanisms independent of HRD. 
+Other mutational processes generating widespread genomic instability in endometrial cancer [CITE DAWN] may elicit TIL responses through common cGAS-STING pathway activation [@Deng2014; @Woo2014]. 
+Additionally, TILs were not correlated with HER2 status by immunohistochemistry or whole-genome sequencing.
+Immunotherapies, anti-HER2 therapies, and PARP inhibitors targeting HRD tumors may represent orthogonal approaches effective in different groups of p53abn endometrial cancers, with some tumors susceptible to multiple agents. 
+
+
+As the use of immunotherapies extends to MMRp endometrial cancers, the immune microenvironment must be considered in addition to molecular subtype as a relevant factor. 
+Our findings highlight properties of the immune microenvironment that may portend susceptibility to immune checkpoint susceptibility in p53abn endometrial cancers, and how these relate to other clinically actionable targets being explored in clinical trials.  
+
+<!-- END -->
+
+<!-- Limitations -->
+<!-- - also TMA -->
+
+
+<!-- To date, immunotherapy trials in endometrial cancer have largely focused on PD1-PDL1 axis blockade. Dostarlimab, an anti-PD1 antibody, was associated with superior outcomes in both MMRd and MMRp cancers. Surprisingly, within the MMRp group there were substantial differences between p53abn and NSMP samples, with p53abn samples showing benefit from addition of dostarlimab. Our results showing the prognostic association between TIL and survival and the high expression of both PD1 and PDL1 in TIL-rich tumors provide context to interpreting the RUBY trial results.  -->
+
+
+<!-- safety of anti-PD1 antibodies (pembro) in KEYNOTE-028 in advanced endometrial cancer => favourable safety profile and ORR ~13% comparable to standard chemotherapy -->
+
+<!-- KEYNOTE-100: only modest reponse in to pembro in advanced recurrent HGSC -->
+
+<!-- [@Miyasaki2014]: endometrial cell line sensitivity to PARPi -->
+
+<!-- BRCA1/BRCA2 mutations -- up to 15% advanced/recurrent endometrial ca had a somatic mutation in Fehniger 2020 SGO winter meeting (see Jamieson2021) -->
+<!-- - but other groups have reported close to general population, and up to 5% BRCA1 in others -->
+
+<!-- [@Talhouk2019]: immune properties within molecular subtypes, not just molecular subtype alone, likely useful for stratification for ICBs -->
+<!-- - i.e. MMRds have more TIL-rich samples than other molecular subtypes, but as we show here over half of p53abns also TIL-rich -->
+<!-- - comparative lack of TIL-rich samples in NSMP in [@Talhouk2019] may also explain the more modest responses to dostarlimab in RUBY in NSMP out of the MMRp -->
+
+
+
+<!-- Due to the difficulty of histotype determination in high-grade endometrial cancers and the limited number of cases for many histotypes, we undertook a histotype-agnostic approach to analysis. An exception was carcinosarcomas, in which TIL-poor tumors were significantly more frequent than in other histotypes, and distinction of malignant from reactive stromal elements was problematic.  -->
+<!-- BLAH BLAH -->
+
+<!-- Stuff about other therapies, how we wanted to offer context in our analysis for combination trials  -->
+
+<!-- next steps needed -- angiogenesis -->
+
+
+<!-- Increasing need to find therapies effective in p53abn ECs, the worst prognostic subtype of endometrial ca -->
+<!-- Current clinical trials -- focus on PARPi in p53abn ECs, HER2, ... -->
+<!-- With evidence of ICB effectiveness in MMRp, specifically p53abn ECs, increasing appreciation that understanding immune microenvironment dynamics in p53abn ECs is important  -->
+<!-- NSMPs have the lowest % of TIL-high samples (?Talhouk 2019?) out of the 4 molecular subtypes, and corresponding dostarlimab shows the least effectiveness in that molecular subtype -->
+<!-- Thus TILs may help stratify patients for ICB therapy -->
+
+<!-- Classically viewed as immune-poor, we show that over half of p53abn ECs fall into a TIL-rich subgroup with high levels of TIL in epithelial and stromal regions -->
+<!-- p53abn EC may recruit TILs through genomic instability upregulating cGAS-STING (see my commented-out notes) -->
+<!-- Unlike HGSC, p53abn ECs do not show a distinct stroma-restricted TIL cluster, and also seem to have better response to ICBs, implying different mechanisms of immune evasion between these cancers despite similar underlying genomics and histomorphological features -->
+<!-- While previous work on a subset of cases did not show a significant association between TIL and survival, our work does -->
+<!-- Interestingly, association seems to be dependent on stage, with advanced stage disease having the strongest association with TIL -->
+<!-- Reason behind this is unclear (??come up with hypotheses) -->
+<!-- TIL-rich tumors also have high PD1 and PDL1 expression -->
+<!-- Helps to provide context for the dostarlimab study -->
+<!-- Thus, our work shows the most promise for ICBs in p53abn advanced stage patients  -->
+
+<!-- IDO1 not associated with TIL-rich tumors -->
+<!-- However, there is a fraction of PDL1- macs that are IDO1+ -->
+<!-- Raises possibility that these could be targetable by IDO1 inhibitors -->
+
+<!-- Maintenance PARPi now being tested in p53abn ECs (RAINBO-RED, 2 year olaparib + adjuvant chemorads vs adjuvant chemorads alone for stage I-III p53abn EC), exploit HRD -->
+<!-- HRD is less common in p53abn EC than HGSC (cite Dawn's paper) -->
+<!-- Unlike in HGSC, HRD is not associated with TIL -->
+<!-- Implies HRD is not dominant factor involved in generating neoantigens in p53abn EC -->
+<!-- Analysis limited by smaller subset of samples that have both sequencing data for mutational signatures and TIL data -->
+
+
+
+
+<!-- Subgroup analysis showed that this effect is most pronounced in advanced disease. This is particularly important as while patients with disease limited to the uterus may be cured by hysterectomy, patients with advanced disease are those with the worst outcomes that would potentially stand to benefit the most from additional adjuvant therapy, e.g. immunotherapy -->
+
+<!-- Discussion re: the subgroup analysis from that trial that Spence sent me the powerpoint from. Some effect seen in p53abns too. This also points towards possible benefit for p53abn ECs from immunotherapy. Future studies should look at this.  -->
+
+<!-- In line with prior findings (@Ashley2019) -- HRD is likely of less importance in p53abn EC (compared to HGSOC). @Ashley2019 showed HRD tumors make up a small subset of EC, @Getz2013 and @Wallbillich2020 showed that BRCA1 and BRCA2 mutations are far less frequent in serous EC compared to HGSOC (though @Wallbillich2020 also showed that non-BRCA HRD genes are mutated at similar frequencies in HGSOC and uterine serous ca), and now we show that it doesn't even correlate with immune response -- perhaps other mechanisms of immunogenicity/neoantigen generation in EC should be explored -->
+
+<!-- Given tendency of p53abn carcinosarcomas to be TIL-low, this may suggest lower response rates to immune checkpoint blockade in this group. Findings in carcinosarcoma however may vary depending on how that group is defined (i.e. whether or not p53abn is considered a necessary criterion or not, as MMRd 'carcinosarcomas' may theoretically respond well to ICB like other MMRd tumors) Currently carcinosarcoma response to ICB not known and is an area of therapy that is being explored (@Bogani2023) -->
+
+
+<!-- @Miyamoto2021 also show that carcinosarcomas seem to have fewer TIL-high samples than uterine serous carcinomas (it's in one of their tables), which is in agreement with our findings -->
+
+<!-- TILs did not correlate with response to ICB in MMRd tumors (@Konstantinopoulos2019) so it remains to be seen if this is true in p53abn -->
+
+<!-- Future studies may also need to look at mechanisms of immune escape in EC, which may include HLA LOH as in HGSC (@Zhang2018) or B2M mutations (@Konstantinopoulos2019) -->
+
+<!-- PD1/PDL1 are higher in TIL-rich tumors -- pharmacologically targetable and anti-PD1 has been shown to be more effective than anti-PDL1 for endometrial ca and quite effective overall (@Passarelli2022) -->
+
+
+
+<!-- Also investigated IDO1, a pharmacogically targetable enzyme involved in the tryptophan-kynurenine pathway which plays a role in immune escape by inhibiting T cell activity (@Passarelli2022). IDO1 not associated with TIL-rich tumors -- may either mean that (1) not important for TIL responses and not a promising candidate for blockade or (2) similarly effective in both TIL rich and TIL poor tumors. This remains to be shown. IDO1 can be induced by IFNg or by TNFbeta and is highly expressed in normal endometrium too.  -->
+
+
+<!-- ## TODOs -->
+
+<!-- * Consider asking Christine/Shelby if we can somehow get detailed spatial data from HALO, etc. -->
+<!-- * At this point it looks like getting the HGSC data will likely be unfruitful and will likely be of limited relevance to the paper anyways -->
+
+## References {.unnumbered}
+
+:::{#refs}
+
+:::

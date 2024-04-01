@@ -1,0 +1,30 @@
+project:
+  type: manuscript
+
+execute:
+  freeze: auto
+
+format:
+  html:
+    toc: true
+    comments:
+      hypothesis: true
+  docx: default
+  jats: default
+  elsevier-pdf:
+    journal:
+      cite-style: number
+  elsevier-html:
+    journal:
+      cite-style: number
+  elsevier-docx:
+    journal:
+      cite-style: number
+
+crossref:
+  custom:
+    - kind: float
+      key: suppfig
+      latex-env: suppfig
+      reference-prefix: Figure S
+      space-before-numbering: false

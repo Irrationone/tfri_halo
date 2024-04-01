@@ -1,0 +1,125 @@
+---
+title: "Mutational signatures"
+format: html
+---
+
+{{< include _data.qmd >}}
+
+```{r, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+library(ggpubr)
+library(ggforce)
+library(cowplot)
+library(ComplexHeatmap)
+
+here::i_am("paper/notebooks/mutational_signatures.qmd")
+```
+
+```{r}
+clinical_annotations_comb_tma <- metatable_clinical %>%
+  select(acc_num, Grade, Histotype, Neoadjuvant, Subtype, Stage) %>%
+  unique %>%
+  left_join(clust_assignments_map)
+```
+
+```{r}
+cnsig_merged <- cnsig_exposures %>% 
+  inner_join(clinical_annotations_comb_tma)
+
+cnsig_merged_long <- cnsig_merged %>% 
+  pivot_longer(cols = colnames(cnsig_merged)[str_detect(colnames(cnsig_merged), "^(VS|BS)")],
+               names_to = "signature", 
+               values_to = "exposure") %>%
+  unique %>%
+  filter(!is.na(clust_map),
+         str_detect(signature, "^VS"))
+
+cnsig_pvals <- compare_means(exposure ~ clust_map, cnsig_merged_long, group.by = c("signature"), method = "wilcox.test", p.adjust.method = "holm")
+
+cnsig_boxplots <- ggplot(cnsig_merged_long, aes(x=clust_map, y=exposure)) + 
+  geom_boxplot(aes(fill=clust_map), alpha = 0.4, width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
+  theme_pubr() + 
+  scale_fill_manual(values = palette_tilclust) + 
+  facet_wrap(~ signature, scales = "free_y", ncol = 3) +
+  #stat_compare_means(vjust = 0.7, size = 3)# + 
+  #stat_compare_means(comparisons = list(c("Low TIL", "High TIL"))) + 
+  theme(strip.background =element_rect(fill="white")) +
+  stat_pvalue_manual(data = cnsig_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 0.9, vjust=1.2, size = 3, bracket.size = 0) + 
+  xlab("") + 
+  ylab("Exposure") + 
+  labs(fill = "Cluster") + 
+  guides(fill = guide_legend(override.aes = list(alpha = 1)))
+```
+
+```{r}
+cnsig_wide <- cnsig_merged_long %>%
+  filter(str_detect(signature, "^VS")) %>%
+  pivot_wider(id_cols = c("acc_num", "clust_map"), names_from = "signature", values_from = "exposure")
+
+cnsig_matrix <- cnsig_wide %>%
+  select(-c(clust_map)) %>%
+  column_to_rownames("acc_num")
+
+clustmap_anno <- columnAnnotation(df = cnsig_wide %>% select(acc_num, clust_map) %>% rename(Cluster=clust_map) %>% column_to_rownames("acc_num"), annotation_width = 0.02, 
+                                  col = list(
+                                    Cluster=palette_tilclust
+                                  ), show_legend = c(FALSE))
+
+cnsig_heatmap <- Heatmap(cnsig_matrix %>% t,
+                         na_col = "gray",
+                         column_names_gp = gpar(fontsize = 6), 
+                         cluster_rows = FALSE,
+                         cluster_columns = TRUE,
+                         clustering_method_columns = "ward.D2",
+                         clustering_method_rows = "ward.D2",
+                         clustering_distance_columns = "pearson",
+                         column_names_rot = 60, 
+                         show_column_names = FALSE,
+                         top_annotation = clustmap_anno,
+                         heatmap_legend_param = list(
+                           title = "Exposure"
+                         ))
+
+cnsig_heatmap_plot <- grid::grid.grabExpr(draw(cnsig_heatmap, heatmap_legend_side = "right", annotation_legend_side="bottom"))
+```
+
+```{r, fig.width = 8, fig.height = 10}
+#| label: fig-mutational-signatures
+#| fig-cap: "Mutational signatures"
+#| fig-alt: "Mutational signatures"
+
+legend <- get_legend(cnsig_boxplots)
+
+plot_grid(legend, cnsig_heatmap_plot, cnsig_boxplots + theme(legend.position = "none"), nrow = 3, labels = c("", "a", "b"), rel_heights = c(0.1, 0.6, 1.2))
+```
+
+```{r}
+## TESTS
+
+unique_outcomes <- c("os", "pfs", "dss")
+
+clinical_clust_mutsig <- clinical_long_clust_assignments %>%
+  inner_join(cnsig_wide %>% unique)
+
+cox_fits_mutsig <- lapply(unique_outcomes, function(x) {
+  df <- clinical_clust_mutsig %>% 
+    filter(outcome == x) %>%
+    rename(
+      Age=age_dx,
+      TIL=clust_map,
+      Chemotherapy=chemo,
+      Radiotherapy=rt,
+      Brachytherapy=brachy,
+      Stage=stage_main
+    ) %>%
+    mutate(
+      TIL=factor(TIL, labels = c("Low TIL", "High TIL"))
+    )
+  cox_fit <- coxph(Surv(time, status) ~  Age + TIL + Chemotherapy + Radiotherapy + Brachytherapy + Stage + VS1, data = df)
+  
+  return(cox_fit)
+})
+names(cox_fits_mutsig) <- unique_outcomes
+```

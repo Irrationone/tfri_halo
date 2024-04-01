@@ -17,3 +17,12 @@ data/processed_old
 results/old
 tikz*.tex
 *.nc
+
+.quarto/
+paper/figure/
+paper/_manuscript/index_files/
+paper/_manuscript/site_libs/
+paper/_manuscript/_tex/
+paper/_manuscript/*.ipynb
+paper/_freeze
+paper/notebooks/*_files

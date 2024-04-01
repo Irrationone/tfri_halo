@@ -1,0 +1,115 @@
+---
+title: "Adaptive response"
+format: html
+---
+
+{{< include _data.qmd >}}
+
+```{r, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+library(readxl)
+library(ggpubr)
+library(ggforce)
+library(cowplot)
+
+here::i_am("paper/notebooks/adaptive_response.qmd")
+```
+
+```{r}
+clinical_annotations_comb_tma <- metatable_full %>%
+  select(acc_num, Grade, Histotype, Neoadjuvant, Subtype, Stage) %>%
+  unique %>%
+  left_join(clust_assignments_map)
+
+densities_labeled <- densities_final %>%
+  inner_join(clinical_annotations_comb_tma) %>%
+  filter(
+    panel == "AR",
+    Subtype == "p53abn",
+    !is.na(clust_map)
+  ) %>%
+  mutate(
+    region = dplyr::recode(region, 'stroma'="Stromal", 'tumour'="Epithelial") %>%
+      factor(levels = c("Epithelial", "Stromal")),
+    variable = dplyr::recode(variable, 
+                             "tcyto_pd1neg"="CD8+PD1-",
+                             "tcyto_pd1pos"="CD8+PD1+",
+                             "mac_pdl1neg_ido1neg"="PDL1-IDO1- Mac",
+                             "mac_pdl1neg_ido1pos"="PDL1-IDO1+ Mac",
+                             "mac_pdl1pos_ido1neg"="PDL1+IDO1- Mac",
+                             "mac_pdl1pos_ido1pos"="PDL1+IDO1+ Mac"
+                             )
+  )
+
+pvals <- compare_means(density ~ clust_map, densities_labeled, group.by = c("variable", "region"), method = "wilcox.test", p.adjust.method = "holm")
+
+#pvals <- densities_labeled %>% group_by(variable, region) %>% dunn_test(density ~ clust_map) %>% adjust_pvalue(p.col = "p", output.col = "p.adj", method = "holm")
+
+densities_labeled_tcyto <- densities_labeled %>%
+  filter(str_detect(variable, "CD8"))
+densities_labeled_macs <- densities_labeled %>%
+  filter(str_detect(variable, "Mac"))
+
+tcyto_densities_plot <- ggplot(densities_labeled_tcyto, aes(x=clust_map, y=log_density)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  theme_pubr() + 
+  theme(strip.background =element_rect(fill="white")) +
+  facet_grid(region ~ variable, scales = "free") + 
+  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "CD8")), label = "p = {scales::pvalue(p.adj)}", y.position = 8, vjust=1.2, size = 3, bracket.size = 0) + 
+  scale_fill_manual(values = palette_tilclust) + 
+  xlab("") + 
+  ylab("log(TIL density)") + 
+  labs(fill = "Cluster")
+
+legend <- get_legend(tcyto_densities_plot)
+
+mac_densities_plot <- ggplot(densities_labeled_macs, aes(x=clust_map, y=log_density)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  theme_pubr() + 
+  theme(strip.background =element_rect(fill="white")) +
+  facet_grid(region ~ variable, scales = "free") + 
+  #stat_compare_means(vjust = 0.7, size = 3)
+  #scale_y_log10() + 
+  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "Mac")), label = "p = {scales::pvalue(p.adj)}", y.position = 8, vjust=1.2, size = 3, bracket.size = 0) + 
+  scale_fill_manual(values = palette_tilclust) + 
+  xlab("") + 
+  ylab("log(TIL density)") + 
+  theme(legend.position = "none")
+```
+
+```{r}
+pd1pos_pd1neg_ratios <- densities_labeled %>% 
+  dplyr::group_by(acc_num, region, clust_map) %>%
+  dplyr::summarise(
+    cd8_pd1pos_prop=density[variable == "CD8+PD1+"]/(density[variable == "CD8+PD1-"]+density[variable == "CD8+PD1+"])) %>%
+  dplyr::ungroup()
+
+pd1pos_pvals <- compare_means(cd8_pd1pos_prop ~ clust_map, pd1pos_pd1neg_ratios, group.by = c("region"), method = "wilcox.test", p.adjust.method = "holm")
+
+pd1pos_prop_plot <- ggplot(pd1pos_pd1neg_ratios %>% mutate(variable = "Proportion PD1+"), aes(x=clust_map, y=cd8_pd1pos_prop)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  theme_pubr() + 
+  theme(strip.background =element_rect(fill="white")) +
+  facet_grid(region ~ variable, scales = "free") + 
+  #scale_y_log10() + 
+  #stat_compare_means() + 
+  stat_pvalue_manual(data = pd1pos_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 1.1, vjust=1.2, size = 3, bracket.size = 0) + 
+  scale_fill_manual(values = palette_tilclust) + 
+  xlab("") + 
+  ylab("Proportion") + 
+  theme(legend.position = "none")
+```
+
+```{r, fig.width = 8, fig.height = 10}
+#| label: fig-tilclust-ardensities
+top_row <- plot_grid(tcyto_densities_plot + theme(legend.position = "none"), pd1pos_prop_plot, labels = c("a", "b"), rel_widths = c(0.5, 0.3), nrow = 1)
+
+plot_grid(legend, top_row, mac_densities_plot, nrow = 3, labels = c("", "", "c"), rel_heights = c(0.2, 1, 1))
+```
+
+
+
