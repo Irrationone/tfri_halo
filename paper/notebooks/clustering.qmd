@@ -233,38 +233,6 @@ cox_tables_merged %>% as_flex_table()
 ```
 
 
-```{r}
-unique_outcomes <- c("os", "pfs", "dss")
-unique_stage <- c("I", "II", "III", "IV")
-
-km_fits <- lapply(unique_outcomes, function(x) {
-  tmp <- lapply(unique_stage, function(stage) {
-    df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage)
-    fit <- survfit(Surv(time, status) ~ clust_map, 
-                   data = df)
-    pval <- surv_pvalue(fit, data = df)
-    plot <- ggsurvplot(fit,
-                       data = df,
-                       pval = FALSE,
-                       pval.method = FALSE,
-                       conf.int = TRUE,
-                       risk.table = TRUE, 
-                       title = paste0("Stage ", stage, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
-                       legend = "none",
-                       palette = unname(palette_tilclust),
-                       xlim = c(0, 13),
-                       break.x.by = 3,
-                       ggtheme = theme_pubr())
-    return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
-  })
-  names(tmp) <- unique_stage
-  return(tmp)
-})
-names(km_fits) <- unique_outcomes
-
-
-```
-
 ```{r, fig.width = 8, fig.height = 6}
 #| label: suppfig-km-stage
 surv_outcome <- "os"

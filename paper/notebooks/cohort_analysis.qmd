@@ -70,5 +70,5 @@ count_distributions
 ```{r}
 #| label: tbl-cohort-overview
 #| tbl-cap: "Cohort statistics"
-summarizor(metatable_full %>% select(Cohort, Age, Stage, Myo, Nodes, Chemotherapy, Radiotherapy, Brachytherapy, acc_num) %>% unique %>% select(-c(acc_num))) %>% flextable::as_flextable() %>% autofit()
+summarizor(metatable_full %>% select(Cohort, Age, Stage, Myo, Nodes, Chemotherapy, Radiotherapy, Brachytherapy, Histotype, acc_num) %>% unique %>% select(-c(acc_num))) %>% flextable::as_flextable() %>% autofit()
 ```

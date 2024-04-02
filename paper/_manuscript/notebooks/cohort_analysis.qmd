@@ -1,0 +1,74 @@
+---
+title: "Cohort-level analysis"
+format: html
+---
+
+{{< include _data.qmd >}}
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(flextable)
+```
+
+
+```{r}
+cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
+                                       col = list(
+                                         Cohort=palette_cohort,
+                                         Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("white", "#2E294E")),
+                                         Subtype=palette_subtype,
+                                         Grade=palette_grade,
+                                         Histotype=palette_histotype,
+                                         LVI=palette_lvi,
+                                         Nodes=palette_nodes,
+                                         Myo=palette_myo,
+                                         Neoadjuvant=palette_neoadjuvant,
+                                         Chemotherapy=palette_binary,
+                                         Radiotherapy=palette_binary,
+                                         Brachytherapy=palette_binary,
+                                         Stage=palette_stage
+                                       ))
+
+cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(TMA, `B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
+                                    col = list(
+                                      TMA=palette_tma,
+                                      `B & T`=palette_binary,
+                                      #Angiogenesis=palette_binary,
+                                      `Adaptive Resistance`=palette_binary
+                                    ))
+```
+
+```{r, fig.width = 19, fig.height = 7, fig.align = 'center'}
+#| label: fig-cohort-track
+#| fig-cap: "Cohort overview"
+#| fig-alt: "Cohort overview. Find out what's going on with angiogenesis."
+cohort_track <- Heatmap(matrix(nc = nrow(metatable_full), nr = 0), 
+	top_annotation = cohort_plot_top, bottom_annotation = cohort_plot_bottom)
+
+draw(cohort_track, annotation_legend_side = "bottom")
+```
+
+```{r, fig.width = 6, fig.height = 24}
+#| label: suppfig-count-distributions
+count_distributions <- counts_summarized %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  scale_x_continuous(trans = 'log1p', breaks = c(0, 1, 10, 100, 1000, 10000),
+                     labels = c("0", "1", "10", "100", "1000", "10000")) + 
+  facet_grid(variable ~ region, scales = "free") +
+  labs(title = "Variables") + 
+  theme_pubr() + 
+  ggtitle("Counts")
+
+count_distributions
+```
+
+```{r}
+#| label: tbl-cohort-overview
+#| tbl-cap: "Cohort statistics"
+summarizor(metatable_full %>% select(Cohort, Age, Stage, Myo, Nodes, Chemotherapy, Radiotherapy, Brachytherapy, Histotype, acc_num) %>% unique %>% select(-c(acc_num))) %>% flextable::as_flextable() %>% autofit()
+```

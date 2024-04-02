@@ -5,21 +5,14 @@ execute:
   freeze: auto
 
 format:
-  html:
-    toc: true
-    comments:
-      hypothesis: true
-  docx: default
-  jats: default
-  elsevier-pdf:
-    journal:
-      cite-style: number
   elsevier-html:
-    journal:
-      cite-style: number
+    cite-style: number
+    toc: true
   elsevier-docx:
-    journal:
-      cite-style: number
+    cite-style: number
+  elsevier-pdf:
+    cite-style: number
+      
 
 crossref:
   custom:

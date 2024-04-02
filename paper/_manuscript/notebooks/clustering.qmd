@@ -1,0 +1,257 @@
+---
+title: "Clustering results"
+format: html
+---
+
+{{< include _data.qmd >}}
+
+```{r, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+library(readxl)
+library(ggpubr)
+library(ggforce)
+library(cowplot)
+library(ComplexHeatmap)
+library(circlize)
+
+library(survival)
+library(survminer)
+library(gtsummary)
+
+here::i_am("paper/notebooks/clustering.qmd")
+```
+
+```{r}
+angio_summarized_comb_tma <- angio_long %>%
+  group_by(acc_num, panel, variable) %>%
+  summarise(
+    value=sum(value)
+  ) %>%
+  ungroup()
+
+vessel_wide_comb_tma <- angio_summarized_comb_tma %>%
+  select(-c(panel)) %>%
+  pivot_wider(names_from = "variable", values_from = "value") %>%
+  mutate(
+    frac_vessel_stroma=area_vessel_mm/(area_stroma_mm+area_vessel_mm),
+    frac_vessel_all=area_vessel_mm/(area_stroma_mm+area_vessel_mm+area_tumour_mm)
+  )
+
+vessel_df_comb_tma <- vessel_wide_comb_tma %>%
+  select(acc_num, frac_vessel_stroma, frac_vessel_all) %>%
+  unique
+```
+
+
+```{r}
+clinical_annotations_comb_tma <- metatable_full %>%
+  select(acc_num, Grade, Histotype, Subtype, Stage) %>%
+  unique %>%
+  left_join(clust_assignments_map)
+
+her2_status <- her2_ihc %>% 
+  select(acc_num, her2_ihc, sWGS) %>%
+  rename(`HER2 CN`=sWGS, `HER2 IHC`=her2_ihc)
+
+overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
+  left_join(vessel_df_comb_tma) %>%
+  left_join(her2_status)
+
+densities_final_wide <- densities_final %>%
+  dplyr::filter(panel == "B&T",
+                variable != "cd8tcell_foxp3pos") %>%
+  select(-c(value, area_region_mm, density, panel, variable, region)) %>%
+  pivot_wider(names_from = variable_full, values_from = log_density)
+
+density_final_input <- densities_final_wide %>% 
+  rename(
+    `Stromal: Plasma`=bcell_cd20neg_stroma,
+    `Epithelial: Plasma`=bcell_cd20neg_tumour,
+    `Stromal: B`=bcell_cd20pos_stroma,
+    `Epithelial: B`=bcell_cd20pos_tumour,
+    `Stromal: Treg`=treg_stroma,
+    `Epithelial: Treg`=treg_tumour,
+    `Stromal: CD8+ T`=tcyto_stroma,
+    `Epithelial: CD8+ T`=tcyto_tumour,
+    `Stromal: T helper`=thelper_stroma,
+    `Epithelial: T helper`=thelper_tumour
+  ) %>%
+  column_to_rownames("acc_num") %>%
+  as.matrix
+```
+
+
+```{r, fig.width=10, fig.height=8}
+mat <- (density_final_input %>% na.omit) %>% scale
+
+col_anno <- (overall_annotations_comb_tma %>% 
+               rename(Cluster=clust_map,
+                      `Vessel density`=frac_vessel_stroma) %>%
+               select(-c(frac_vessel_all, count_pct)) %>%
+               column_to_rownames("acc_num"))[rownames(mat),]
+
+mat <- mat[which(col_anno$Subtype == "p53abn" & !is.na(col_anno$Cluster)),] %>% scale
+col_anno <- col_anno[rownames(mat),]
+col_anno <- col_anno[,!str_detect(colnames(col_anno), "Subtype")]
+
+ha <- columnAnnotation(df = col_anno, annotation_width = 0.02, 
+                       col = list(
+                         Cluster=palette_tilclust,
+                         `Vessel density`=colorRamp2(c(0, 1), c("white", "red")),
+                         Cohort=palette_cohort,
+                         Grade=palette_grade,
+                         Histotype=palette_histotype,
+                         Stage=palette_stage
+                       ))
+
+density_heatmap <- Heatmap(mat %>% t,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           clustering_method_columns = "ward.D2",
+                           clustering_method_rows = "ward.D2",
+                           column_names_rot = 60, 
+                           show_column_names = FALSE, 
+                           column_split = col_anno$clust_map,
+                           top_annotation = ha,
+                           heatmap_legend_param = list(
+                             title = "Density"
+                           ))
+
+
+densities_tilclust_plot <-grid::grid.grabExpr(draw(density_heatmap, heatmap_legend_side = "bottom", annotation_legend_side="bottom", legend_grouping = "original", merge_legend = TRUE, align_heatmap_legend = "heatmap_center"), width = 10, height = 8)
+```
+
+
+```{r}
+# cox_hazards_plot <- ggplot(cox_hazards_renamed, aes(y=variable, group=outcome, colour=outcome)) + 
+#   geom_point(aes(x=exp(log.estimate)), position=position_dodge(width=0.5), shape=15, size=3) + 
+#   geom_linerange(aes(xmin=exp(log.conf.low), xmax=exp(log.conf.high)), position=position_dodge(width=0.5)) + 
+#   theme_pubr() + 
+#   geom_vline(xintercept = c(0.1, 0.2, 0.5, 2, 4, 8, 16, 32), linetype = 3) + 
+#   geom_vline(xintercept = 1, alpha = 0.7) + 
+#   facet_col(~ category, scales = "free_y", space = "free", strip.position = "left") + 
+#   theme(strip.placement = "outside", strip.background = element_blank(), strip.text = element_text(face = "bold")) + 
+#   ylab("") + 
+#   scale_y_discrete(limits = rev) + 
+#   scale_colour_manual(values = brewer.pal(4, "Set2")) + 
+#   xlab("Hazard ratio") + 
+#   scale_x_continuous(trans = "log", breaks = c(0.1, 0.2, 0.5, 1, 2, 4, 8, 16, 32))
+```
+
+```{r}
+densities_labeled <- densities_final %>%
+  inner_join(clinical_annotations_comb_tma) %>%
+  filter(
+    panel == "B&T",
+    Subtype == "p53abn",
+    !is.na(clust_map)
+  )
+
+densities_cyto <- densities_labeled %>% 
+  filter(variable %in% c("tcyto", "tcyto_pd1neg", "tcyto_pd1pos")) %>%
+  rename(cyto_density=density)
+
+densities_treg <- densities_labeled %>% 
+  filter(variable %in% c("treg")) %>%
+  rename(treg_density=density) %>%
+  select(c(acc_num, region, treg_density))
+
+densities_cyto_treg <- densities_cyto %>%
+  left_join(densities_treg) %>%
+  mutate(cyto_treg_ratio=cyto_density/treg_density) %>%
+  filter(area_region_mm > 0.01) %>%
+  mutate(region = dplyr::recode(region, "stroma"="Stromal", "tumour"="Epithelial") %>%
+           factor(levels = c("Epithelial", "Stromal")))
+
+cd8_treg_pvals <- compare_means(cyto_treg_ratio ~ clust_map, densities_cyto_treg %>% filter(!is.infinite(cyto_treg_ratio)), group.by = c("region"), method = "wilcox.test", p.adjust.method = "holm")
+
+cd8_treg_ratio_plot <- ggplot(densities_cyto_treg %>% filter(cyto_density > 0, treg_density > 0), aes(x=clust_map, y=cyto_treg_ratio)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) + 
+  theme_pubr() + 
+  facet_wrap(~ region, ncol = 2) +
+  scale_y_log10() + 
+  theme(strip.background =element_rect(fill="white")) +
+  stat_pvalue_manual(data = cd8_treg_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 2, vjust=1.2, size = 3, bracket.size = 0) + 
+  scale_fill_manual(values = palette_tilclust) + 
+  xlab("") + 
+  ylab("CD8/Treg ratio") + 
+  labs(fill = "Cluster") + 
+  guides(fill = guide_legend(override.aes = list(alpha = 1)))
+
+cluster_legend <- get_legend(cd8_treg_ratio_plot)
+```
+
+
+```{r, fig.height = 11, fig.width = 10}
+#| label: fig-densities-tilclust
+#| fig-cap: "Clusters and association with survival"
+#| fig-alt: "Clusters and association with survival"
+plot_grid(densities_tilclust_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), nrow = 2, ncol = 1, rel_heights = c(0.6, 0.4), labels = c("a", "b"))
+```
+
+```{r}
+#| label: suppfig-densities-correlation
+density_cormat <- density_final_input %>%
+  cor(., method = "pearson")
+diag(density_cormat) <- NA
+
+pheatmap(density_cormat, color = c("white", "red"), breaks = c(0, 1), heatmap_legend_param = list(title = "Correlation"))
+```
+
+```{r, fig.width = 6, fig.height = 6}
+#| label: suppfig-densities-stage
+## Log-rank tests within stage seem to maintain significance; but not as a whole. Is it because TILd is somehow correlated with stage?
+ggplot(densities_labeled %>% filter(Subtype == "p53abn", variable %in% c("tcyto", "thelper")), aes(x=Stage, y=log_density)) + 
+  geom_boxplot(aes(colour=Stage), outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) + 
+  theme_pubr() + 
+  facet_grid(variable ~ region) + 
+  stat_compare_means(comparisons = list(c("I", "II"), c("I", "III"), c("I", "IV")))
+```
+
+```{r}
+## USE EXISTING FUNCTIONS FOR PLOTTING
+
+cox_tables <- lapply(cox_fits, function(cox_fit) {
+  cox_table <- cox_fit %>% tbl_regression(exponentiate = TRUE, show_single_row = c("TIL", "Chemotherapy", "Radiotherapy", "Brachytherapy"))
+  
+  return(cox_table)
+})
+
+cox_tables_merged <- tbl_merge(tbls = cox_tables,
+          tab_spanner = c("Overall survival", "Progression-free survival", "Disease-specific survival"))
+```
+
+```{r}
+#| label: tbl-cox-hazards
+#| tbl-cap: "Cox hazards table"
+cox_tables_merged %>% as_flex_table()
+```
+
+
+```{r, fig.width = 8, fig.height = 6}
+#| label: suppfig-km-stage
+surv_outcome <- "os"
+top_plot <- plot_grid(km_fits[[surv_outcome]]$I$plot,
+                      km_fits[[surv_outcome]]$II$plot,
+                      km_fits[[surv_outcome]]$III$plot,
+                      km_fits[[surv_outcome]]$IV$plot,
+                      ncol = 2, labels = c("auto"))
+plot_grid(top_plot, cluster_legend, nrow = 2, rel_heights = c(1, 0.1))
+```
+
+```{r}
+vessel_clustmap <- vessel_df_comb_tma %>%
+  inner_join(clust_assignments_map)
+
+ggplot(vessel_clustmap, aes(x=clust_map, y=frac_vessel_stroma)) + 
+  geom_boxplot(aes(fill=clust_map), outlier.size = -1, width = 0.5) + 
+  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.2) +
+  theme_pubr() +
+  stat_compare_means() + 
+  scale_fill_manual(values = palette_tilclust)
+```
