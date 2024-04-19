@@ -193,13 +193,20 @@ cluster_legend <- get_legend(cd8_treg_ratio_plot)
 plot_grid(densities_tilclust_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), nrow = 2, ncol = 1, rel_heights = c(0.6, 0.4), labels = c("a", "b"))
 ```
 
-```{r}
+```{r, fig.width = 6.5, fig.height = 6}
 #| label: suppfig-densities-correlation
 density_cormat <- density_final_input %>%
   cor(., method = "pearson")
-diag(density_cormat) <- NA
+diag(density_cormat) <- 1
 
-pheatmap(density_cormat, color = c("white", "red"), breaks = c(0, 1), heatmap_legend_param = list(title = "Correlation"))
+density_hc <- hclust(dist(density_cormat))
+
+density_cormat <- density_cormat[density_hc$order, density_hc$order]
+
+density_hc2 <- hclust(dist(density_cormat))
+density_cormat[lower.tri(density_cormat)] <- NA
+
+pheatmap::pheatmap(density_cormat, color = colorRampPalette(c("white", "red"))(100), breaks = seq(0, 1, 0.01), na_col = "#FFFFFF", heatmap_legend_param = list(title = "Correlation"), cluster_cols = density_hc2, cluster_rows = FALSE, border_color = NA)
 ```
 
 ```{r, fig.width = 6, fig.height = 6}

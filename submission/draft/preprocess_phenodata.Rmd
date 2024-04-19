@@ -313,8 +313,8 @@ sample_map <- sectormaps_long %>%
   rename(acc_num=Accession, block=Block, backup=Backup) %>%
   select(tma, sector, core, row, col, acc_num, block, backup) %>%
   dplyr::mutate(
-    row = as.character(row),
-    col = as.character(col)
+    row = trimws(as.character(row)),
+    col = trimws(as.character(col))
   )
 ```
 
@@ -372,6 +372,57 @@ ar_pheno_100056_labeled <- ar_pheno_100056_merged %>%
   )
 ```
 
+```{r}
+ar_area_100056_file_path <- file.path(ar_dir, "AdaptR Final (minus CD8-PD1)", "FINAL 10-005&6 ADAPTR AREA QUANT 30JUN23.xlsx")
+ar_area_100056_sheetnames <- excel_sheets(ar_area_100056_file_path)
+
+
+ar_area_100056_data <- lapply(ar_area_100056_sheetnames, function(sn) {
+  df <- read_excel(ar_area_100056_file_path, na = c("", "x", "excluded", "n/a"), sheet = sn)
+  df <- df %>%
+    dplyr::mutate(tma=str_extract(`Image Tag`, "^[0-9]{2}_[0-9]{3}[A-Z]?")) %>%
+    ## The labeling scheme seems to be different each time ... 
+    dplyr::mutate(
+      tma = dplyr::recode(tma,
+                          "10_005V"="10-005",
+                          "10_006V"="10-006")
+    ) %>%
+    dplyr::mutate(
+      secrowcol=str_extract(`Image Tag`, "(?<=Core\\[)[0-9,]+(?=\\])")
+    ) %>%
+    separate(secrowcol, sep = ",", c("sector", "row", "col")) %>%
+    dplyr::mutate(
+      sector = as.numeric(sector)
+    )
+  
+  return(df)
+}) 
+names(ar_area_100056_data) <- ar_area_100056_sheetnames
+
+ar_area_100056_merged <- reduce(ar_area_100056_data, dplyr::inner_join)
+
+ar_area_100056_labeled <- ar_area_100056_merged %>%
+  left_join(sample_map) %>%
+  dplyr::select(tma, acc_num, sector, row, col, core, Notes, everything()) %>%
+  dplyr::rename(notes=Notes) %>%
+  dplyr::arrange(tma, sector, row, col, acc_num) %>%
+  dplyr::mutate(
+    acc_num=str_replace(acc_num, "-(0+)", "-")
+  ) %>%
+  dplyr::mutate(
+    acc_num=dplyr::recode(
+      acc_num,
+      'O3S-2724'='VS03-2724',
+      'YW-EC002'='VS08-19857',
+      'YW-EC003'='VS10-497',
+      'YW-EC005'='VS10-25417',
+      'YW-EC008'='VS13-5723',
+      'YW-EC010'='VS13-19793',
+      'YW-EC014'='VS16-22196'
+    )
+  )
+```
+
 
 #### Filtering
 
@@ -400,6 +451,36 @@ ar_pheno_100056_labeled <- ar_pheno_100056_labeled %>%
   filter(ifelse(is.na(notes), TRUE, !str_detect(notes, pattern = "(Exclude|exclude|discard)"))) %>%
   mutate(acc_num=str_replace(acc_num, " \\(.*", "")) %>%
   select(c(tma, sector, row, col, acc_num, block, unname(colname_map)))
+```
+
+
+```{r}
+colname_map_area <- c(
+  "Tumour Area (mm²)"='area_tumour_mm',
+  "Stroma Area (mm²)"='area_stroma_mm',
+  "Tumour: PDL1+IDO1+CD68- Area (μm²)"='area_pdl1pos_ido1pos_cd68neg_tumour',
+  "Tumour: PDL1+IDO1-CD68- Area (μm²)"='area_pdl1pos_ido1neg_cd68neg_tumour',
+  "Tumour: PDL1-IDO1+CD68- Area (μm²)"='area_pdl1neg_ido1pos_cd68neg_tumour',
+  "Tumour: PDL1+IDO1-CD68+ Area (μm²)"='area_pdl1pos_ido1neg_cd68pos_tumour',
+  "Tumour: PDL1-IDO1+CD68+ Area (μm²)"='area_pdl1neg_ido1pos_cd68pos_tumour',
+  "Tumour: PDL1+IDO1+CD68+ Area (μm²)"='area_pdl1pos_ido1pos_cd68pos_tumour',
+  "Tumour: CD68+IDO1-PDL1- Area (μm²)"='area_pdl1neg_ido1neg_cd68pos_tumour',
+  "Tumour: PDL1-IDO1-CD68- Area (μm²)"='area_pdl1neg_ido1neg_cd68neg_tumour',
+  "Stroma: PDL1+IDO1+CD68- Area (μm²)"='area_pdl1pos_ido1pos_cd68neg_stroma',
+  "Stroma: PDL1+IDO1-CD68- Area (μm²)"='area_pdl1pos_ido1neg_cd68neg_stroma',
+  "Stroma: PDL1-IDO1+CD68- Area (μm²)"='area_pdl1neg_ido1pos_cd68neg_stroma',
+  "Stroma: PDL1+IDO1-CD68+ Area (μm²)"='area_pdl1pos_ido1neg_cd68pos_stroma',
+  "Stroma: PDL1-IDO1+CD68+ Area (μm²)"='area_pdl1neg_ido1pos_cd68pos_stroma',
+  "Stroma: PDL1+IDO1+CD68+ Area (μm²)"='area_pdl1pos_ido1pos_cd68pos_stroma',
+  "Stroma: CD68+IDO1-PDL1- Area (μm²)"='area_pdl1neg_ido1neg_cd68pos_stroma',
+  "Stroma: PDL1-IDO1-CD68- Area (μm²)"='area_pdl1neg_ido1neg_cd68neg_stroma'
+)
+
+ar_area_100056_labeled <- ar_area_100056_labeled %>% 
+  rename_with(~ colname_map_area[.], .cols = names(colname_map_area)) %>%
+  filter(ifelse(is.na(notes), TRUE, !str_detect(notes, pattern = "(Exclude|exclude|discard)"))) %>%
+  mutate(acc_num=str_replace(acc_num, " \\(.*", "")) %>%
+  select(c(tma, sector, row, col, acc_num, block, unname(colname_map_area)))
 ```
 
 
@@ -461,6 +542,62 @@ ar_pheno_22004_labeled <- ar_pheno_22004_merged %>%
   )
 ```
 
+
+```{r}
+ar_area_22004_file_path <- file.path(ar_dir, "AdaptR Final (minus CD8-PD1)", "22-004 A B AdaptR FINAL data 30JUNE2023.xlsx")
+ar_area_22004_sheetnames <- excel_sheets(ar_area_22004_file_path)
+
+ar_area_22004_data <- lapply(ar_area_22004_sheetnames, function(sn) {
+  df <- read_excel(ar_area_22004_file_path, na = c("", "x"), sheet = sn)
+  df <- df %>%
+    dplyr::mutate(tma=str_extract(`Image Tag`, "^[0-9]{2}_[0-9]{3}[A-Z]?")) %>%
+    ## The labeling scheme seems to be different each time ... 
+    dplyr::mutate(
+      tma = dplyr::recode(tma,
+                          "22_004A"="22-004A",
+                          "22_004V"="22-004B")
+    ) %>%
+    dplyr::mutate(
+      secrowcol=str_extract(`Image Tag`, "(?<=Core\\[)[0-9,]+(?=\\])")
+    ) %>%
+    separate(secrowcol, sep = ",", c("sector", "row2", "col2")) %>%
+    dplyr::mutate(
+      sector = as.numeric(sector),
+      row = ifelse(tma == "22-004B", col2, row2),
+      col = ifelse(tma == "22-004B", row2, col2)
+    ) %>%
+    dplyr::select(-c(row2, col2))
+  
+  return(df)
+}) 
+names(ar_area_22004_data) <- ar_area_22004_sheetnames
+
+# Manually checked that this has the same number of rows as all the sub-data frames
+ar_area_22004_merged <- reduce(ar_area_22004_data, dplyr::inner_join, by = c("Image Tag", "tma", "sector", "row", "col", "Classified Area (mm²)", "Stroma Area (mm²)", "Tumour Area (mm²)", "% Stroma", "% Tumour"))
+
+ar_area_22004_labeled <- ar_area_22004_merged %>%
+  left_join(sample_map) %>%
+  dplyr::select(tma, acc_num, sector, row, col, core, Notes, everything()) %>%
+  dplyr::rename(notes=Notes) %>%
+  dplyr::arrange(tma, sector, row, col, acc_num) %>%
+  dplyr::mutate(
+    acc_num=str_replace(acc_num, "-(0+)", "-")
+  ) %>%
+  # THIS WILL NEED TO GO IN B&T ANALYSIS TOO
+  dplyr::mutate(
+    acc_num=dplyr::recode(
+      acc_num,
+      'O3S-2724'='VS03-2724',
+      'YW-EC002'='VS08-19857',
+      'YW-EC003'='VS10-497',
+      'YW-EC005'='VS10-25417',
+      'YW-EC008'='VS13-5723',
+      'YW-EC010'='VS13-19793',
+      'YW-EC014'='VS16-22196'
+    )
+  )
+```
+
 #### Filtering
 
 ```{r}
@@ -492,19 +629,54 @@ ar_pheno_22004_labeled <- ar_pheno_22004_labeled %>%
   select(c(tma, sector, row, col, acc_num, block, unname(colname_map)))
 ```
 
+```{r}
+colname_map_area2 <- c(
+  "Tumour Area (mm²)"='area_tumour_mm',
+  "Stroma Area (mm²)"='area_stroma_mm',
+  "Tumour: PDL1+IDO1+CD68- Area (μm²)"='area_pdl1pos_ido1pos_cd68neg_tumour',
+  "Tumour: PDL1+IDO1-CD68- Area (μm²)"='area_pdl1pos_ido1neg_cd68neg_tumour',
+  "Tumour: PDL1-IDO1+CD68- Area (μm²)"='area_pdl1neg_ido1pos_cd68neg_tumour',
+  "Tumour: PDL1+IDO1-CD68+ Area (μm²)"='area_pdl1pos_ido1neg_cd68pos_tumour',
+  "Tumour: PDL1-IDO1+CD68+ Area (μm²)"='area_pdl1neg_ido1pos_cd68pos_tumour',
+  "Tumour: PDL1+IDO1+CD68+ Area (μm²)"='area_pdl1pos_ido1pos_cd68pos_tumour',
+  "Tumour: CD68+PDL1-IDO1- Area (μm²)"='area_pdl1neg_ido1neg_cd68pos_tumour',
+  "Tumour: PDL1-IDO1-CD68- Area (μm²)"='area_pdl1neg_ido1neg_cd68neg_tumour',
+  "Stroma: PDL1+IDO1+CD68- Area (μm²)"='area_pdl1pos_ido1pos_cd68neg_stroma',
+  "Stroma: PDL1+IDO1-CD68- Area (μm²)"='area_pdl1pos_ido1neg_cd68neg_stroma',
+  "Stroma: PDL1-IDO1+CD68- Area (μm²)"='area_pdl1neg_ido1pos_cd68neg_stroma',
+  "Stroma: PDL1+IDO1-CD68+ Area (μm²)"='area_pdl1pos_ido1neg_cd68pos_stroma',
+  "Stroma: PDL1-IDO1+CD68+ Area (μm²)"='area_pdl1neg_ido1pos_cd68pos_stroma',
+  "Stroma: PDL1+IDO1+CD68+ Area (μm²)"='area_pdl1pos_ido1pos_cd68pos_stroma',
+  "Stroma: CD68+PDL1-IDO1- Area (μm²)"='area_pdl1neg_ido1neg_cd68pos_stroma',
+  "Stroma: PDL1-IDO1-CD68- Area (μm²)"='area_pdl1neg_ido1neg_cd68neg_stroma'
+)
+
+ar_area_22004_labeled <- ar_area_22004_labeled %>% 
+  rename_with(~ colname_map_area2[.], .cols = names(colname_map_area2)) %>%
+  filter(ifelse(is.na(notes), TRUE, !str_detect(notes, pattern = "(Exclude|exclude|discard)"))) %>%
+  mutate(acc_num=str_replace(acc_num, " \\(.*", "")) %>%
+  select(c(tma, sector, row, col, acc_num, block, unname(colname_map_area2)))
+```
 
 ### Merged
 
 ```{r}
 ar_pheno_all <- ar_pheno_100056_labeled %>%
   bind_rows(ar_pheno_22004_labeled)
+
+ar_area_all <- ar_area_100056_labeled %>%
+  bind_rows(ar_area_22004_labeled)
 ```
 
 ```{r}
 ar_output_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
+ar_area_output_path <- here::here("data", "processed", "ar_area_labeled.tsv")
 
 write_tsv(ar_pheno_all, file = ar_output_path)
+write_tsv(ar_area_all, file = ar_area_output_path)
 ```
+
+
 
 
 # Angiogenesis
@@ -617,4 +789,7 @@ angio_output_path <- here::here("data", "processed", "angio_labeled.tsv")
 
 write_tsv(angio_data_labeled, file = angio_output_path)
 ```
+
+
+
 

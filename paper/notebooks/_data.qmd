@@ -56,6 +56,7 @@ bt_data_path <- here::here("data", "processed", "bt_labeled.tsv")
 
 # Adaptive resistance 
 ar_pheno_data_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
+ar_area_data_path <- here::here("data", "processed", "ar_area_labeled.tsv")
 
 # Angio (areas only now)
 angio_data_path <- here::here("data", "processed", "angio_labeled.tsv")
@@ -72,6 +73,7 @@ clinical <- clinical %>%
 bt <- read_tsv(bt_data_path)
 
 ar_pheno <- read_tsv(ar_pheno_data_path)
+ar_area <- read_tsv(ar_area_data_path)
 
 angio <- read_tsv(angio_data_path)
 ```
@@ -86,12 +88,16 @@ bt <- bt %>%
 ar_pheno <- ar_pheno %>%
   select(-c(block)) 
 
+ar_area <- ar_area %>%
+  select(-c(block)) 
+
 angio <- angio %>%
   select(-c(block))
 
 # Remove rows with no entries
 bt_clean <- bt[complete.cases(bt),]
 ar_pheno_clean <- ar_pheno[complete.cases(ar_pheno),]
+ar_area_clean <- ar_area[complete.cases(ar_area),]
 angio_clean <- angio[complete.cases(angio),]
 ```
 
@@ -119,6 +125,16 @@ metatable_angio <- angio %>%
   )
 
 metatable_ar <- ar_pheno %>%
+  dplyr::select(tma, acc_num) %>%
+  mutate(`Adaptive Resistance` = TRUE,
+         tma=str_replace_all(tma, "[AB]$", "")) %>%
+  unique %>%
+  rename(TMA=tma) %>%
+  mutate(
+    TMA = factor(TMA, levels = c("10-005", "10-006", "22-004"))
+  )
+
+metatable_ar_area <- ar_area %>%
   dplyr::select(tma, acc_num) %>%
   mutate(`Adaptive Resistance` = TRUE,
          tma=str_replace_all(tma, "[AB]$", "")) %>%
@@ -203,6 +219,17 @@ ar_pheno_long <- ar_pheno_clean %>%
     col = as.character(col)
   )
 
+ar_area_long <- ar_area_clean %>%
+  # Pivot on the count columns
+  pivot_longer(cols = all_of(colnames(ar_area_clean)[str_detect(colnames(ar_area_clean), "^(area_pdl1)")]), 
+               names_to = "variable", 
+               values_to = "value") %>%
+  mutate(
+    panel = "AR",
+    row = as.character(row),
+    col = as.character(col)
+  )
+
 angio_long <- angio_clean %>%
   pivot_longer(cols = all_of(colnames(angio_clean)[str_detect(colnames(angio_clean), "^(area)")]),
                names_to = "variable",
@@ -271,6 +298,35 @@ counts_final <- counts_summarized %>%
 densities_final <- counts_final %>%
   mutate(log_density = log1p(density),
          variable_full = paste0(variable, "_", region))
+```
+
+```{r}
+ar_area_long <- ar_area_long %>%
+  mutate(area_region_mm=ifelse(str_detect(variable, "tumour"),
+                               area_tumour_mm,
+                               area_stroma_mm),
+         region=str_extract(variable, "(tumour|stroma)$"),
+         variable=str_replace(variable, "^area_", ""),
+         variable=str_replace(variable, "_(tumour|stroma)$", ""))
+
+
+ar_area_summarized <- ar_area_long %>%
+  group_by(acc_num, panel, variable, region) %>% 
+  summarise(
+    value = sum(value),
+    area_region_mm = sum(area_region_mm)
+  ) %>%
+  ungroup()
+
+ar_area_final <- ar_area_summarized %>%
+  group_by(acc_num, region, panel) %>%
+  summarise(
+    pdl1pos_ido1neg_nonmac_prop=value[variable == "pdl1pos_ido1neg_cd68neg"]/(value[variable == "pdl1pos_ido1neg_cd68neg"] + value[variable == "pdl1neg_ido1neg_cd68neg"] + value[variable == "pdl1pos_ido1pos_cd68neg"] + value[variable == "pdl1neg_ido1pos_cd68neg"]),
+    pdl1neg_ido1pos_nonmac_prop=value[variable == "pdl1neg_ido1pos_cd68neg"]/(value[variable == "pdl1pos_ido1neg_cd68neg"] + value[variable == "pdl1neg_ido1neg_cd68neg"] + value[variable == "pdl1pos_ido1pos_cd68neg"] + value[variable == "pdl1neg_ido1pos_cd68neg"]),
+    pdl1pos_ido1pos_nonmac_prop=value[variable == "pdl1pos_ido1pos_cd68neg"]/(value[variable == "pdl1pos_ido1neg_cd68neg"] + value[variable == "pdl1neg_ido1neg_cd68neg"] + value[variable == "pdl1pos_ido1pos_cd68neg"] + value[variable == "pdl1neg_ido1pos_cd68neg"]),
+    pdl1neg_ido1neg_nonmac_prop=value[variable == "pdl1neg_ido1neg_cd68neg"]/(value[variable == "pdl1pos_ido1neg_cd68neg"] + value[variable == "pdl1neg_ido1neg_cd68neg"] + value[variable == "pdl1pos_ido1pos_cd68neg"] + value[variable == "pdl1neg_ido1pos_cd68neg"])
+  ) %>%
+  ungroup()
 ```
 
 ```{r, warning=FALSE, include=FALSE}
@@ -480,6 +536,30 @@ names(cox_fits_cs) <- unique_outcomes
 #                            age = "Age")) %>%
 #   mutate(variable = factor(variable, levels = c("Age", "High TIL", "Low TIL", "Chemotherapy", "Brachytherapy", "Radiotherapy", "II", "III", "IV"))) %>%
 #   arrange(outcome, variable)
+
+
+# cox_fits_pdl1 <- lapply(unique_outcomes, function(x) {
+#   df <- clinical_long_clust_assignments %>% 
+#     dplyr::left_join(ar_area_final_tumor) %>%
+#     dplyr::mutate(pdl1_tumor=pdl1pos_ido1pos_nonmac_prop + pdl1pos_ido1neg_nonmac_prop,
+#                   ido1_tumor=pdl1neg_ido1pos_nonmac_prop + pdl1pos_ido1pos_nonmac_prop) %>%
+#     filter(outcome == x) %>%
+#     rename(
+#       Age=age_dx,
+#       TIL=clust_map,
+#       Chemotherapy=chemo,
+#       Radiotherapy=rt,
+#       Brachytherapy=brachy,
+#       Stage=stage_main
+#     ) %>%
+#     mutate(
+#       TIL=factor(TIL, labels = c("Low TIL", "High TIL"))
+#     )
+#   cox_fit <- coxph(Surv(time, status) ~  Age + ido1_tumor + Chemotherapy + Radiotherapy + Brachytherapy + Stage, data = df)
+#   
+#   return(cox_fit)
+# })
+# names(cox_fits_pdl1) <- unique_outcomes
 ```
 
 ```{r}

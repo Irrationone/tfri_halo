@@ -17,6 +17,7 @@ data/processed_old
 results/old
 tikz*.tex
 *.nc
+tmp/
 
 .quarto/
 paper/figure/

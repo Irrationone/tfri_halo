@@ -16,7 +16,7 @@ library(flextable)
 
 
 ```{r}
-cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
+cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant)) %>% as.data.frame, 
                                        col = list(
                                          Cohort=palette_cohort,
                                          Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("white", "#2E294E")),
@@ -26,7 +26,7 @@ cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(
                                          LVI=palette_lvi,
                                          Nodes=palette_nodes,
                                          Myo=palette_myo,
-                                         Neoadjuvant=palette_neoadjuvant,
+                                         #Neoadjuvant=palette_neoadjuvant,
                                          Chemotherapy=palette_binary,
                                          Radiotherapy=palette_binary,
                                          Brachytherapy=palette_binary,
@@ -70,5 +70,5 @@ count_distributions
 ```{r}
 #| label: tbl-cohort-overview
 #| tbl-cap: "Cohort statistics"
-summarizor(metatable_full %>% select(Cohort, Age, Stage, Myo, Nodes, Chemotherapy, Radiotherapy, Brachytherapy, Histotype, acc_num) %>% unique %>% select(-c(acc_num))) %>% flextable::as_flextable() %>% autofit()
+summarizor(metatable_full %>% dplyr::select(Histotype, Age, Stage, Myo, Nodes, LVI, Chemotherapy, Radiotherapy, Brachytherapy, acc_num) %>% unique %>% dplyr::select(-c(acc_num)) %>% dplyr::rename(Myoinvasion=Myo, `Lymph node status` = Nodes, `Lymphovascular invasion`=LVI)) %>% flextable::as_flextable() %>% autofit()
 ```

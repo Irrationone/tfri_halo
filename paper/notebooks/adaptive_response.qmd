@@ -33,12 +33,12 @@ densities_labeled <- densities_final %>%
     region = dplyr::recode(region, 'stroma'="Stromal", 'tumour'="Epithelial") %>%
       factor(levels = c("Epithelial", "Stromal")),
     variable = dplyr::recode(variable, 
-                             "tcyto_pd1neg"="CD8+PD1-",
-                             "tcyto_pd1pos"="CD8+PD1+",
-                             "mac_pdl1neg_ido1neg"="PDL1-IDO1- Mac",
-                             "mac_pdl1neg_ido1pos"="PDL1-IDO1+ Mac",
-                             "mac_pdl1pos_ido1neg"="PDL1+IDO1- Mac",
-                             "mac_pdl1pos_ido1pos"="PDL1+IDO1+ Mac"
+                             "tcyto_pd1neg"="PD1-",
+                             "tcyto_pd1pos"="PD1+",
+                             "mac_pdl1neg_ido1neg"="PDL1-IDO1-",
+                             "mac_pdl1neg_ido1pos"="PDL1-IDO1+",
+                             "mac_pdl1pos_ido1neg"="PDL1+IDO1-",
+                             "mac_pdl1pos_ido1pos"="PDL1+IDO1+"
                              )
   )
 
@@ -47,68 +47,113 @@ pvals <- compare_means(density ~ clust_map, densities_labeled, group.by = c("var
 #pvals <- densities_labeled %>% group_by(variable, region) %>% dunn_test(density ~ clust_map) %>% adjust_pvalue(p.col = "p", output.col = "p.adj", method = "holm")
 
 densities_labeled_tcyto <- densities_labeled %>%
-  filter(str_detect(variable, "CD8"))
+  filter(str_detect(variable, "PD1"))
 densities_labeled_macs <- densities_labeled %>%
-  filter(str_detect(variable, "Mac"))
+  filter(str_detect(variable, "PDL1"))
 
-tcyto_densities_plot <- ggplot(densities_labeled_tcyto, aes(x=clust_map, y=log_density)) + 
+tcyto_densities_plot <- ggplot(densities_labeled_tcyto, aes(x=region, y=log_density)) + 
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
-  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  geom_point(aes(fill = clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width=0.5), alpha = 0.1) + 
   theme_pubr() + 
   theme(strip.background =element_rect(fill="white")) +
-  facet_grid(region ~ variable, scales = "free") + 
-  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "CD8")), label = "p = {scales::pvalue(p.adj)}", y.position = 8, vjust=1.2, size = 3, bracket.size = 0) + 
+  facet_grid( ~ variable, scales = "free") + 
+  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "PD1")), label = "p = {p.adj}", x = "region", y.position = 8, vjust=1.2, size = 3, bracket.size = 0) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("log(TIL density)") + 
-  labs(fill = "Cluster")
+  labs(fill = "Cluster") + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  ggtitle("CD8+ T cells")
 
 legend <- get_legend(tcyto_densities_plot)
 
-mac_densities_plot <- ggplot(densities_labeled_macs, aes(x=clust_map, y=log_density)) + 
+mac_densities_plot <- ggplot(densities_labeled_macs, aes(x=region, y=log_density)) + 
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
-  geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
+  geom_point(aes(fill = clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width = 0.5), alpha = 0.1) + 
   theme_pubr() + 
   theme(strip.background =element_rect(fill="white")) +
-  facet_grid(region ~ variable, scales = "free") + 
+  facet_grid( ~ variable, scales = "free") + 
   #stat_compare_means(vjust = 0.7, size = 3)
   #scale_y_log10() + 
-  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "Mac")), label = "p = {scales::pvalue(p.adj)}", y.position = 8, vjust=1.2, size = 3, bracket.size = 0) + 
+  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "PDL1")), label = "p = {p.adj}", x = "region", y.position = 8.5, vjust=1.2, size = 3, bracket.size = 0) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("log(TIL density)") + 
-  theme(legend.position = "none")
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5, face = "bold")) +
+  ggtitle("Macrophages")
 ```
 
 ```{r}
 pd1pos_pd1neg_ratios <- densities_labeled %>% 
   dplyr::group_by(acc_num, region, clust_map) %>%
   dplyr::summarise(
-    cd8_pd1pos_prop=density[variable == "CD8+PD1+"]/(density[variable == "CD8+PD1-"]+density[variable == "CD8+PD1+"])) %>%
+    cd8_pd1pos_prop=density[variable == "PD1+"]/(density[variable == "PD1-"]+density[variable == "PD1+"])) %>%
   dplyr::ungroup()
 
 pd1pos_pvals <- compare_means(cd8_pd1pos_prop ~ clust_map, pd1pos_pd1neg_ratios, group.by = c("region"), method = "wilcox.test", p.adjust.method = "holm")
 
-pd1pos_prop_plot <- ggplot(pd1pos_pd1neg_ratios %>% mutate(variable = "Proportion PD1+"), aes(x=clust_map, y=cd8_pd1pos_prop)) + 
+pd1pos_prop_plot <- ggplot(pd1pos_pd1neg_ratios %>% mutate(variable = "Proportion PD1+"), aes(x=region, y=cd8_pd1pos_prop)) + 
+  geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
+  geom_point(aes(fill=clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width = 0.5), alpha = 0.1) + 
+  theme_pubr() + 
+  theme(strip.background =element_rect(fill="white")) +
+  #facet_grid(region ~ variable, scales = "free") + 
+  #scale_y_log10() + 
+  #stat_compare_means() + 
+  stat_pvalue_manual(data = pd1pos_pvals, label = "p = {scales::pvalue(p.adj)}", x = "region", y.position = 1.1, vjust=1.2, size = 3, bracket.size = 0) + 
+  scale_fill_manual(values = palette_tilclust) + 
+  xlab("") + 
+  ylab("Proportion PD1+") + 
+  theme(legend.position = "none") + 
+  ggtitle("")
+```
+
+
+
+```{r}
+ar_area_final_tumour <- ar_area_final %>%
+  filter(region == "tumour")
+
+ar_area_final_tumour_long <- ar_area_final_tumour %>%
+  pivot_longer(cols = colnames(ar_area_final_tumour)[str_detect(colnames(ar_area_final_tumour), "^pdl1")], names_to = "variable", values_to = "proportion") %>%
+  dplyr::mutate(variable = dplyr::recode(variable,
+                                         "pdl1pos_ido1neg_nonmac_prop"="PDL1+IDO1-",
+                                         "pdl1neg_ido1pos_nonmac_prop"="PDL1-IDO1+",
+                                         "pdl1pos_ido1pos_nonmac_prop"="PDL1+IDO1+",
+                                         "pdl1neg_ido1neg_nonmac_prop"="PDL1-IDO1-")
+  )
+
+ar_area_long_labeled <- ar_area_final_tumour_long %>%
+  inner_join(clinical_annotations_comb_tma) %>%
+  filter(
+    panel == "AR",
+    Subtype == "p53abn",
+    !is.na(clust_map),
+    variable %in% c("PDL1+IDO1-", "PDL1+IDO1+", "PDL1-IDO1+")
+  )
+ar_area_clust_pvals <- compare_means(proportion ~ clust_map, ar_area_long_labeled, group.by = c("variable"), method = "wilcox.test", p.adjust.method = "holm")
+
+tumor_pdl1_ido1_plot <- ggplot(ar_area_long_labeled, aes(x=clust_map, y=proportion)) + 
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
   geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
   theme_pubr() + 
   theme(strip.background =element_rect(fill="white")) +
-  facet_grid(region ~ variable, scales = "free") + 
-  #scale_y_log10() + 
-  #stat_compare_means() + 
-  stat_pvalue_manual(data = pd1pos_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 1.1, vjust=1.2, size = 3, bracket.size = 0) + 
+  facet_wrap( ~ variable) + 
+  scale_y_log10() + 
+  stat_pvalue_manual(data = ar_area_clust_pvals, label = "p = {p.adj}", y.position = 1.1, vjust=1.2, size = 3, bracket.size = 0) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("Proportion") + 
-  theme(legend.position = "none")
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5, face = "bold"), axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggtitle("Tumor cells")
 ```
+
 
 ```{r, fig.width = 8, fig.height = 10}
 #| label: fig-tilclust-ardensities
 top_row <- plot_grid(tcyto_densities_plot + theme(legend.position = "none"), pd1pos_prop_plot, labels = c("a", "b"), rel_widths = c(0.5, 0.3), nrow = 1)
 
-plot_grid(legend, top_row, mac_densities_plot, nrow = 3, labels = c("", "", "c"), rel_heights = c(0.2, 1, 1))
+plot_grid(legend, top_row, mac_densities_plot, tumor_pdl1_ido1_plot, nrow = 4, labels = c("", "", "c", "d"), rel_heights = c(0.2, 1, 1, 1))
 ```
 
 
