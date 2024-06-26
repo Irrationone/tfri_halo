@@ -19,7 +19,7 @@ library(flextable)
 cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant)) %>% as.data.frame, 
                                        col = list(
                                          Cohort=palette_cohort,
-                                         Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("white", "#2E294E")),
+                                         Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("lightgray", "#2E294E")),
                                          Subtype=palette_subtype,
                                          Grade=palette_grade,
                                          Histotype=palette_histotype,
@@ -31,7 +31,7 @@ cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(
                                          Radiotherapy=palette_binary,
                                          Brachytherapy=palette_binary,
                                          Stage=palette_stage
-                                       ))
+                                       ), na_col = "white")
 
 cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(TMA, `B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
                                     col = list(
@@ -70,5 +70,10 @@ count_distributions
 ```{r}
 #| label: tbl-cohort-overview
 #| tbl-cap: "Cohort statistics"
-summarizor(metatable_full %>% dplyr::select(Histotype, Age, Stage, Myo, Nodes, LVI, Chemotherapy, Radiotherapy, Brachytherapy, acc_num) %>% unique %>% dplyr::select(-c(acc_num)) %>% dplyr::rename(Myoinvasion=Myo, `Lymph node status` = Nodes, `Lymphovascular invasion`=LVI)) %>% flextable::as_flextable() %>% autofit()
+summarizor(metatable_full %>% 
+             dplyr::select(Histotype, Age, Stage, Myo, Nodes, LVI, Chemotherapy, Radiotherapy, Brachytherapy, acc_num) %>% 
+             unique %>% 
+             dplyr::select(-c(acc_num)) %>% 
+             dplyr::mutate(Histotype = factor(Histotype, levels = c(names(metatable_full$Histotype %>% table %>% sort %>% rev)))) %>%
+             dplyr::rename(Myoinvasion=Myo, `Lymph node status` = Nodes, `Lymphovascular invasion`=LVI)) %>% flextable::as_flextable() %>% autofit()
 ```

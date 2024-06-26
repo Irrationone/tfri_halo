@@ -564,11 +564,15 @@ names(cox_fits_cs) <- unique_outcomes
 
 ```{r}
 unique_outcomes <- c("os", "pfs", "dss")
-unique_stage <- c("I", "II", "III", "IV")
+unique_stage <- c("I", "II", "III", "IV", "all")
 
 km_fits <- lapply(unique_outcomes, function(x) {
   tmp <- lapply(unique_stage, function(stage) {
-    df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage)
+    if (stage == "all") {
+      df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main %in% c("I", "II", "III", "IV"))
+    } else {
+      df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage)
+    }
     fit <- survfit(Surv(time, status) ~ clust_map, 
                    data = df)
     pval <- surv_pvalue(fit, data = df)
@@ -590,6 +594,66 @@ km_fits <- lapply(unique_outcomes, function(x) {
   return(tmp)
 })
 names(km_fits) <- unique_outcomes
+```
+
+```{r}
+unique_chemo <- c(FALSE, TRUE)
+km_chemo_fits <- lapply(unique_outcomes, function(x) {
+  tmp <- lapply(unique_chemo, function(chemo_opt) {
+    df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main %in% c("I", "II", "III", "IV"), chemo == chemo_opt)
+    fit <- survfit(Surv(time, status) ~ clust_map, 
+                   data = df)
+    pval <- surv_pvalue(fit, data = df)
+    plot <- ggsurvplot(fit,
+                       data = df,
+                       pval = FALSE,
+                       pval.method = FALSE,
+                       conf.int = TRUE,
+                       risk.table = TRUE, 
+                       title = paste0("Chemo ", chemo_opt, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                       legend = "none",
+                       palette = unname(palette_tilclust),
+                       xlim = c(0, 13),
+                       break.x.by = 3,
+                       ggtheme = theme_pubr())
+    return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+  })
+  names(tmp) <- unique_chemo
+  return(tmp)
+})
+names(km_chemo_fits) <- unique_outcomes
+```
+
+
+```{r}
+km_stage_chemo_fits <- lapply(unique_outcomes, function(x) {
+  tmp1 <- lapply(c("I", "II", "III", "IV"), function(stage_opt) {
+    tmp <- lapply(unique_chemo, function(chemo_opt) {
+      df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage_opt, chemo == chemo_opt)
+      fit <- survfit(Surv(time, status) ~ clust_map, 
+                     data = df)
+      pval <- surv_pvalue(fit, data = df)
+      plot <- ggsurvplot(fit,
+                         data = df,
+                         pval = FALSE,
+                         pval.method = FALSE,
+                         conf.int = TRUE,
+                         risk.table = TRUE, 
+                         title = paste0("Stage ", stage_opt, " Chemo ", chemo_opt, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                         legend = "none",
+                         palette = unname(palette_tilclust),
+                         xlim = c(0, 13),
+                         break.x.by = 3,
+                         ggtheme = theme_pubr())
+      return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+    })
+    names(tmp) <- unique_chemo
+    return(tmp)
+  })
+  names(tmp1) <- c("I", "II", "III", "IV")
+  return(tmp1)
+})
+names(km_stage_chemo_fits) <- unique_outcomes
 ```
 
 
@@ -700,6 +764,11 @@ p53abn_cohort_track <- merge_on_all_identifiers(p53abn_cohort_track, correct_ide
 # Note: tried a few additional analyses that didn't show significant results, including CCNE1 CNV <=> clust_map, p53abn IHC and mutation type <=> clust_map
 ```
 
-
+```{r}
+her2_ihc_clust_assignments <- clust_assignments_map %>%
+  inner_join(her2_ihc) %>%
+  inner_join(metatable_full) %>%
+  filter(Subtype == "p53abn")
+```
 
 

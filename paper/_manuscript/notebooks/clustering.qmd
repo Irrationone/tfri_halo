@@ -88,7 +88,7 @@ mat <- (density_final_input %>% na.omit) %>% scale
 col_anno <- (overall_annotations_comb_tma %>% 
                rename(Cluster=clust_map,
                       `Vessel density`=frac_vessel_stroma) %>%
-               select(-c(frac_vessel_all, count_pct)) %>%
+               select(-c(frac_vessel_all, count_pct, `HER2 IHC`, `HER2 CN`, `Vessel density`)) %>%
                column_to_rownames("acc_num"))[rownames(mat),]
 
 mat <- mat[which(col_anno$Subtype == "p53abn" & !is.na(col_anno$Cluster)),] %>% scale
@@ -98,7 +98,7 @@ col_anno <- col_anno[,!str_detect(colnames(col_anno), "Subtype")]
 ha <- columnAnnotation(df = col_anno, annotation_width = 0.02, 
                        col = list(
                          Cluster=palette_tilclust,
-                         `Vessel density`=colorRamp2(c(0, 1), c("white", "red")),
+                         #`Vessel density`=colorRamp2(c(0, 1), c("white", "red")),
                          Cohort=palette_cohort,
                          Grade=palette_grade,
                          Histotype=palette_histotype,
@@ -114,7 +114,8 @@ density_heatmap <- Heatmap(mat %>% t,
                            clustering_method_rows = "ward.D2",
                            column_names_rot = 60, 
                            show_column_names = FALSE, 
-                           column_split = col_anno$clust_map,
+                           column_split = col_anno$Cluster,
+                           column_title = NULL,
                            top_annotation = ha,
                            heatmap_legend_param = list(
                              title = "Density"
@@ -185,12 +186,30 @@ cd8_treg_ratio_plot <- ggplot(densities_cyto_treg %>% filter(cyto_density > 0, t
 cluster_legend <- get_legend(cd8_treg_ratio_plot)
 ```
 
+```{r}
+densities_cyto_all <- densities_cyto %>% 
+  filter(variable %in% c("tcyto"),
+         region == "tumour")
 
-```{r, fig.height = 11, fig.width = 10}
+histotype_kd_til_plot <- ggplot(densities_cyto_all, aes(log_density)) + 
+  geom_density() + 
+  facet_wrap(~ Histotype, ncol = 1, strip.position = "left") + 
+  theme_pubr() + 
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        strip.text.y.left = element_text(angle = 0, hjust = 1),  strip.background.y = element_blank(), strip.placement = "outside") + 
+  xlab("log(Epithelial CD8+ TIL density)") + 
+  ylab("")
+
+densities_bottomrow_plot <- plot_grid(histotype_kd_til_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), ncol = 2, rel_widths = c(0.45, 0.55), labels = c("b", "c"))
+```
+
+```{r, fig.height = 10, fig.width = 10}
 #| label: fig-densities-tilclust
 #| fig-cap: "Clusters and association with survival"
 #| fig-alt: "Clusters and association with survival"
-plot_grid(densities_tilclust_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), nrow = 2, ncol = 1, rel_heights = c(0.6, 0.4), labels = c("a", "b"))
+plot_grid(densities_tilclust_plot, densities_bottomrow_plot, nrow = 2, ncol = 1, rel_heights = c(0.55, 0.45), labels = c("a", ""))
 ```
 
 ```{r, fig.width = 6.5, fig.height = 6}
@@ -224,7 +243,7 @@ ggplot(densities_labeled %>% filter(Subtype == "p53abn", variable %in% c("tcyto"
 ## USE EXISTING FUNCTIONS FOR PLOTTING
 
 cox_tables <- lapply(cox_fits, function(cox_fit) {
-  cox_table <- cox_fit %>% tbl_regression(exponentiate = TRUE, show_single_row = c("TIL", "Chemotherapy", "Radiotherapy", "Brachytherapy"))
+  cox_table <- cox_fit %>% tbl_regression(exponentiate = TRUE, show_single_row = c("TIL", "Chemotherapy", "Radiotherapy", "Brachytherapy"), pvalue_fun = function(x) style_pvalue(x, digits = 2))
   
   return(cox_table)
 })
@@ -240,16 +259,28 @@ cox_tables_merged %>% as_flex_table()
 ```
 
 
-```{r, fig.width = 8, fig.height = 6}
-#| label: suppfig-km-stage
+```{r, fig.width = 8, fig.height = 8}
+#| label: fig-km-stage
 surv_outcome <- "os"
+km_all_plot <- km_fits[[surv_outcome]]$all$plot
+km_all_plot$labels$title <- str_replace(km_all_plot$labels$title, "Stage all", "Overall survival")
 top_plot <- plot_grid(km_fits[[surv_outcome]]$I$plot,
                       km_fits[[surv_outcome]]$II$plot,
                       km_fits[[surv_outcome]]$III$plot,
                       km_fits[[surv_outcome]]$IV$plot,
-                      ncol = 2, labels = c("auto"))
-plot_grid(top_plot, cluster_legend, nrow = 2, rel_heights = c(1, 0.1))
+                      ncol = 2, labels = c("b", "c", "d", "e"))
+plot_grid(km_all_plot, top_plot, cluster_legend, nrow = 3, rel_heights = c(1.5, 1.5, 0.1), labels = c("a", "", ""))
 ```
+
+
+```{r, fig.width = 8, fig.height = 4}
+#| label: suppfig-km-chemo
+surv_outcome2 <- "dss"
+plot_grid(km_chemo_fits[[surv_outcome2]][[1]]$plot,
+          km_chemo_fits[[surv_outcome2]][[2]]$plot,
+          ncol = 2, labels = "auto")
+```
+
 
 ```{r}
 vessel_clustmap <- vessel_df_comb_tma %>%

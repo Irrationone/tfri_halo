@@ -42,7 +42,7 @@ cnsig_boxplots <- ggplot(cnsig_merged_long, aes(x=clust_map, y=exposure)) +
   geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
   theme_pubr() + 
   scale_fill_manual(values = palette_tilclust) + 
-  facet_wrap(~ signature, scales = "free_y", ncol = 3) +
+  facet_wrap(~ signature, scales = "free_y", ncol = 5) +
   #stat_compare_means(vjust = 0.7, size = 3)# + 
   #stat_compare_means(comparisons = list(c("Low TIL", "High TIL"))) + 
   theme(strip.background =element_rect(fill="white")) +
@@ -85,14 +85,36 @@ cnsig_heatmap <- Heatmap(cnsig_matrix %>% t,
 cnsig_heatmap_plot <- grid::grid.grabExpr(draw(cnsig_heatmap, heatmap_legend_side = "right", annotation_legend_side="bottom"))
 ```
 
-```{r, fig.width = 8, fig.height = 10}
+```{r}
+her2_ihc_plot <- ggplot(her2_ihc_clust_assignments %>% filter(!is.na(her2_ihc)), aes(x=her2_ihc, fill = clust_map)) + 
+  geom_bar(width = 0.5) + 
+  xlab("HER2 (IHC)") + 
+  theme_pubr() + 
+  guides(fill = FALSE) +
+  scale_fill_manual(values = palette_tilclust) + 
+  ylab("Samples")
+
+her2_swgs_plot <- ggplot(her2_ihc_clust_assignments %>% 
+                           filter(sWGS != "No Data") %>%
+                           mutate(sWGS = factor(sWGS, levels = c("Normal", "Loss", "Gain", "Amplification", "High Amplification")) %>% factor(labels = c("Normal", "Loss", "Gain", "Amp", "HLAmp"))), aes(x=sWGS, fill = clust_map)) + 
+  geom_bar(width = 0.5) + 
+  xlab("HER2 (CN)") + 
+  theme_pubr() + 
+  guides(fill = FALSE) +
+  scale_fill_manual(values = palette_tilclust) + 
+  ylab("Samples")
+```
+
+```{r, fig.width = 10, fig.height = 10}
 #| label: fig-mutational-signatures
 #| fig-cap: "Mutational signatures"
 #| fig-alt: "Mutational signatures"
 
 legend <- get_legend(cnsig_boxplots)
 
-plot_grid(legend, cnsig_heatmap_plot, cnsig_boxplots + theme(legend.position = "none"), nrow = 3, labels = c("", "a", "b"), rel_heights = c(0.1, 0.6, 1.2))
+her2_row <- plot_grid(her2_ihc_plot, her2_swgs_plot, ncol = 2, labels = c("c", "d"), rel_widths = c(0.45, 0.55))
+
+plot_grid(legend, cnsig_heatmap_plot, cnsig_boxplots + theme(legend.position = "none"), her2_row, nrow = 4, labels = c("", "a", "b", ""), rel_heights = c(0.1, 0.6, 0.4, 0.6))
 ```
 
 ```{r}
