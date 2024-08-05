@@ -400,19 +400,19 @@ cs_pval <- with(histotype_tilclust_rowwise, p.adj[group == "carcinosarcoma (MMMT
 
 histotype_tilclust_counts <- histotype_tilclust_table %>% as.data.frame.table
 
-cs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype == "carcinosarcoma (MMMT)", clust_map == "Low TIL"))$Freq
+cs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype == "carcinosarcoma (MMMT)", clust_map == "TIL-poor"))$Freq
 cs_total_count <- (histotype_tilclust_counts %>% filter(Histotype == "carcinosarcoma (MMMT)"))$Freq %>% sum
 
-noncs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype != "carcinosarcoma (MMMT)", clust_map == "Low TIL"))$Freq %>% sum
+noncs_lowtil_count <- (histotype_tilclust_counts %>% filter(Histotype != "carcinosarcoma (MMMT)", clust_map == "TIL-poor"))$Freq %>% sum
 noncs_total_count <- (histotype_tilclust_counts %>% filter(Histotype != "carcinosarcoma (MMMT)"))$Freq %>% sum
 
 max_csfit_til_pval <- sapply(cox_fits_cs[c("os")], function(x) {
-  summary(x)$coefficients["TILHigh TIL","Pr(>|z|)"]
+  summary(x)$coefficients["TILTIL-rich","Pr(>|z|)"]
 }) %>% max
 
-csfit_til_HR <- summary(cox_fits_cs$os)$coefficients["TILHigh TIL","exp(coef)"]
-csfit_til_lowerHR <- summary(cox_fits_cs$os)$conf.int["TILHigh TIL","lower .95"]
-csfit_til_upperHR <- summary(cox_fits_cs$os)$conf.int["TILHigh TIL","upper .95"]
+csfit_til_HR <- summary(cox_fits_cs$os)$coefficients["TILTIL-rich","exp(coef)"]
+csfit_til_lowerHR <- summary(cox_fits_cs$os)$conf.int["TILTIL-rich","lower .95"]
+csfit_til_upperHR <- summary(cox_fits_cs$os)$conf.int["TILTIL-rich","upper .95"]
 
 min_csfit_cs_pval <- sapply(cox_fits_cs, function(x) {
   summary(x)$coefficients["CarcinosarcomaTRUE","Pr(>|z|)"]

@@ -24,15 +24,14 @@ colorscheme_brewer <- function(x, palname) {
 ```{r, warning=FALSE, include=FALSE}
 # COLOR MAPS
 
-palette_tilclust <- c('Low TIL'='#324376',
-                      'High TIL'='#F76C5E')
+palette_tilclust <- c('TIL-poor'='#324376',
+                      'TIL-rich'='#F76C5E')
 
 palette_cohort <- c("Cross Canada"="#D90368",
                     "Historic Vancouver"="#7F95D1")
 
-palette_nodes <- c("negative"="#E6EBE0", 
-                   "positive"="#36C9C6", 
-                   "not tested"="#696773")
+palette_nodes <- c("-"="#E6EBE0", 
+                   "+"="#36C9C6")
 
 palette_binary <- c('Yes'="#2E282A", 
                     'No'="#E7ECEF")
@@ -43,8 +42,8 @@ palette_tma <- c("10-005"="#88A096",
 hist_mapping <- c("endometrioid (squamous)" = "endometrioid", 
                   "mixed endometrioid and serous" = "mixed", 
                   "mixed serous and moderately differentiated" = "mixed",
-                  "undifferentiated" = "undiff/dediff",
-                  "dedifferentiated" = "undiff/dediff")
+                  "undifferentiated" = "other",
+                  "dedifferentiated" = "other")
 ```
 
 ```{r, warning=FALSE, include=FALSE}
@@ -150,9 +149,13 @@ metatable_clinical <- clinical %>%
   rename(Cohort=cohort, Subtype=eclass2_ngs, Age=age_dx, Stage=stage_main, Grade=grade_rev, Histotype=hist_rev,
          LVI=lvi, Nodes=nodes, Myo=myo, Neoadjuvant=neoadj, Chemotherapy=chemo, Radiotherapy=rt, Brachytherapy=brachy) %>%
   mutate(
+    LVI = dplyr::recode(LVI, 'negative'='-', 'positive'='+ (unspecified)', 'focal'='+ (focal)', 'extensive'='+ (extensive)'),
+    Nodes = dplyr::recode(Nodes, 'negative'='-', 'positive'='+')
+  ) %>%
+  mutate(
     Grade = factor(Grade, levels = c("1", "2", "3")),
-    LVI = factor(LVI, levels = c("negative","focal", "positive", "extensive")),
-    Nodes = factor(Nodes, levels = c("negative", "positive", "not tested")),
+    LVI = factor(LVI, levels = c("-", "+ (unspecified)", "+ (focal)", "+ (extensive)")),
+    Nodes = factor(Nodes, levels = c("-", "+")),
     Myo = factor(Myo, levels = c("none", "1-50%", ">50%")),
     Neoadjuvant = factor(Neoadjuvant, levels = c("chemo only", "horm only", "RT only", "yes/NOS", "none")),
     Chemotherapy = factor(dplyr::recode(as.character(Chemotherapy), 'FALSE'='No', 'TRUE'='Yes'), levels = c('Yes', 'No')),
@@ -298,6 +301,28 @@ counts_final <- counts_summarized %>%
 densities_final <- counts_final %>%
   mutate(log_density = log1p(density),
          variable_full = paste0(variable, "_", region))
+
+densities_final_wide <- densities_final %>%
+  dplyr::filter(panel == "B&T",
+                variable != "cd8tcell_foxp3pos") %>%
+  select(-c(value, area_region_mm, density, panel, variable, region)) %>%
+  pivot_wider(names_from = variable_full, values_from = log_density)
+
+density_final_input <- densities_final_wide %>% 
+  rename(
+    `Stromal: Plasma`=bcell_cd20neg_stroma,
+    `Epithelial: Plasma`=bcell_cd20neg_tumour,
+    `Stromal: B`=bcell_cd20pos_stroma,
+    `Epithelial: B`=bcell_cd20pos_tumour,
+    `Stromal: Treg`=treg_stroma,
+    `Epithelial: Treg`=treg_tumour,
+    `Stromal: CD8+ T`=tcyto_stroma,
+    `Epithelial: CD8+ T`=tcyto_tumour,
+    `Stromal: T helper`=thelper_stroma,
+    `Epithelial: T helper`=thelper_tumour
+  ) %>%
+  column_to_rownames("acc_num") %>%
+  as.matrix
 ```
 
 ```{r}
@@ -427,8 +452,8 @@ clust_assignments_map <- clust_assignments_summarized %>%
     count_pct=max(count_pct)
   ) %>%
   mutate(
-    clust_map = dplyr::recode(clust_map, '0'='High TIL', '1'='Low TIL') %>%
-      factor(levels = c("Low TIL", "High TIL"))
+    clust_map = dplyr::recode(clust_map, '0'='TIL-rich', '1'='TIL-poor') %>%
+      factor(levels = c("TIL-poor", "TIL-rich"))
   )
 
 # clust_assignments_map_comb_outcomes <- clust_assignments_summarized %>%
@@ -469,7 +494,7 @@ cox_fits <- lapply(unique_outcomes, function(x) {
       Stage=stage_main
     ) %>%
     mutate(
-      TIL=factor(TIL, labels = c("Low TIL", "High TIL"))
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich"))
     )
   cox_fit <- coxph(Surv(time, status) ~  Age + TIL + Chemotherapy + Radiotherapy + Brachytherapy + Stage, data = df)
   
@@ -492,13 +517,37 @@ cox_fits_cs <- lapply(unique_outcomes, function(x) {
       Stage=stage_main
     ) %>%
     mutate(
-      TIL=factor(TIL, labels = c("Low TIL", "High TIL"))
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich"))
     )
   cox_fit <- coxph(Surv(time, status) ~  Age + TIL + Chemotherapy + Radiotherapy + Brachytherapy + Stage + Carcinosarcoma, data = df)
   
   return(cox_fit)
 })
 names(cox_fits_cs) <- unique_outcomes
+
+clinical_til_densities <- clinical_long_clust_assignments %>% 
+  dplyr::inner_join(density_final_input %>% as.data.frame %>% rownames_to_column("acc_num"))
+
+cox_fits_by_tiltype <- lapply(unique_outcomes, function(x) {
+  df <- clinical_til_densities %>% 
+    filter(outcome == x) %>%
+    rename(
+      Age=age_dx,
+      TIL=clust_map,
+      Chemotherapy=chemo,
+      Radiotherapy=rt,
+      Brachytherapy=brachy,
+      Stage=stage_main
+    )
+  
+  res <- lapply(colnames(density_final_input), function(tiltype) {
+    cox_fit <- coxph(as.formula(paste0("Surv(time, status) ~  Age + Chemotherapy + Radiotherapy + Brachytherapy + Stage + `", tiltype, "`")), data = df)
+    return(cox_fit)
+  })
+  names(res) <- colnames(density_final_input)
+  return(res)
+})
+names(cox_fits_by_tiltype) <- unique_outcomes
 
 # max_iter <- length(unique(trace_tables_merged$iter))
 # 
@@ -582,13 +631,13 @@ km_fits <- lapply(unique_outcomes, function(x) {
                        pval.method = FALSE,
                        conf.int = TRUE,
                        risk.table = TRUE, 
-                       title = paste0("Stage ", stage, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                       title = paste0("Stage ", stage, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(str_replace_all(pval$pval.txt, " ", ""), "p", "*P*"), ")"),
                        legend = "none",
                        palette = unname(palette_tilclust),
                        xlim = c(0, 13),
                        break.x.by = 3,
                        ggtheme = theme_pubr())
-    return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+    return(list(fit=fit, plot=plot$plot + theme(plot.title = ggtext::element_markdown(hjust = 0.5)), pval=pval))
   })
   names(tmp) <- unique_stage
   return(tmp)
@@ -604,19 +653,24 @@ km_chemo_fits <- lapply(unique_outcomes, function(x) {
     fit <- survfit(Surv(time, status) ~ clust_map, 
                    data = df)
     pval <- surv_pvalue(fit, data = df)
+    if (chemo_opt) {
+      plot_title <- "Chemotherapy"
+    } else {
+      plot_title <- "No chemotherapy"
+    }
     plot <- ggsurvplot(fit,
                        data = df,
                        pval = FALSE,
                        pval.method = FALSE,
                        conf.int = TRUE,
                        risk.table = TRUE, 
-                       title = paste0("Chemo ", chemo_opt, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                       title = paste0(plot_title, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(str_replace_all(pval$pval.txt, " ", ""), "p", "*P*"), ")"),
                        legend = "none",
                        palette = unname(palette_tilclust),
                        xlim = c(0, 13),
                        break.x.by = 3,
                        ggtheme = theme_pubr())
-    return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+    return(list(fit=fit, plot=plot$plot + theme(plot.title = ggtext::element_markdown(hjust = 0.5)), pval=pval))
   })
   names(tmp) <- unique_chemo
   return(tmp)
@@ -654,6 +708,38 @@ km_stage_chemo_fits <- lapply(unique_outcomes, function(x) {
   return(tmp1)
 })
 names(km_stage_chemo_fits) <- unique_outcomes
+```
+
+```{r}
+unique_rt <- c(FALSE, TRUE)
+km_stage_rt_fits <- lapply(unique_outcomes, function(x) {
+  tmp1 <- lapply(c("I", "II", "III", "IV"), function(stage_opt) {
+    tmp <- lapply(unique_rt, function(rt_opt) {
+      df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage_opt, rt == rt_opt)
+      fit <- survfit(Surv(time, status) ~ clust_map, 
+                     data = df)
+      pval <- surv_pvalue(fit, data = df)
+      plot <- ggsurvplot(fit,
+                         data = df,
+                         pval = FALSE,
+                         pval.method = FALSE,
+                         conf.int = TRUE,
+                         risk.table = TRUE, 
+                         title = paste0("Stage ", stage_opt, " RT ", rt_opt, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                         legend = "none",
+                         palette = unname(palette_tilclust),
+                         xlim = c(0, 13),
+                         break.x.by = 3,
+                         ggtheme = theme_pubr())
+      return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+    })
+    names(tmp) <- unique_rt
+    return(tmp)
+  })
+  names(tmp1) <- c("I", "II", "III", "IV")
+  return(tmp1)
+})
+names(km_stage_rt_fits) <- unique_outcomes
 ```
 
 

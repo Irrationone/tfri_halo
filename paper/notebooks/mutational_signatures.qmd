@@ -35,7 +35,8 @@ cnsig_merged_long <- cnsig_merged %>%
   filter(!is.na(clust_map),
          str_detect(signature, "^VS"))
 
-cnsig_pvals <- compare_means(exposure ~ clust_map, cnsig_merged_long, group.by = c("signature"), method = "wilcox.test", p.adjust.method = "holm")
+cnsig_pvals <- compare_means(exposure ~ clust_map, cnsig_merged_long, group.by = c("signature"), method = "wilcox.test", p.adjust.method = "holm") %>%
+  dplyr::mutate(p.final = paste0("italic(P)==", p.adj))
 
 cnsig_boxplots <- ggplot(cnsig_merged_long, aes(x=clust_map, y=exposure)) + 
   geom_boxplot(aes(fill=clust_map), alpha = 0.4, width = 0.5, outlier.size = -1) + 
@@ -46,7 +47,7 @@ cnsig_boxplots <- ggplot(cnsig_merged_long, aes(x=clust_map, y=exposure)) +
   #stat_compare_means(vjust = 0.7, size = 3)# + 
   #stat_compare_means(comparisons = list(c("Low TIL", "High TIL"))) + 
   theme(strip.background =element_rect(fill="white")) +
-  stat_pvalue_manual(data = cnsig_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 0.9, vjust=1.2, size = 3, bracket.size = 0) + 
+  stat_pvalue_manual(data = cnsig_pvals, label = "p.final", y.position = 0.9, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
   xlab("") + 
   ylab("Exposure") + 
   labs(fill = "Cluster") + 
@@ -137,7 +138,7 @@ cox_fits_mutsig <- lapply(unique_outcomes, function(x) {
       Stage=stage_main
     ) %>%
     mutate(
-      TIL=factor(TIL, labels = c("Low TIL", "High TIL"))
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich"))
     )
   cox_fit <- coxph(Surv(time, status) ~  Age + TIL + Chemotherapy + Radiotherapy + Brachytherapy + Stage + VS1, data = df)
   

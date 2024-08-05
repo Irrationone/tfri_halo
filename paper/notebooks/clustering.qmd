@@ -57,28 +57,6 @@ her2_status <- her2_ihc %>%
 overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
   left_join(vessel_df_comb_tma) %>%
   left_join(her2_status)
-
-densities_final_wide <- densities_final %>%
-  dplyr::filter(panel == "B&T",
-                variable != "cd8tcell_foxp3pos") %>%
-  select(-c(value, area_region_mm, density, panel, variable, region)) %>%
-  pivot_wider(names_from = variable_full, values_from = log_density)
-
-density_final_input <- densities_final_wide %>% 
-  rename(
-    `Stromal: Plasma`=bcell_cd20neg_stroma,
-    `Epithelial: Plasma`=bcell_cd20neg_tumour,
-    `Stromal: B`=bcell_cd20pos_stroma,
-    `Epithelial: B`=bcell_cd20pos_tumour,
-    `Stromal: Treg`=treg_stroma,
-    `Epithelial: Treg`=treg_tumour,
-    `Stromal: CD8+ T`=tcyto_stroma,
-    `Epithelial: CD8+ T`=tcyto_tumour,
-    `Stromal: T helper`=thelper_stroma,
-    `Epithelial: T helper`=thelper_tumour
-  ) %>%
-  column_to_rownames("acc_num") %>%
-  as.matrix
 ```
 
 
@@ -191,7 +169,7 @@ densities_cyto_all <- densities_cyto %>%
   filter(variable %in% c("tcyto"),
          region == "tumour")
 
-histotype_kd_til_plot <- ggplot(densities_cyto_all, aes(log_density)) + 
+histotype_kd_til_plot <- ggplot(densities_cyto_all %>% dplyr::mutate(Histotype=dplyr::recode(Histotype, "carcinosarcoma (MMMT)"="carcinosarcoma")), aes(log_density)) + 
   geom_density() + 
   facet_wrap(~ Histotype, ncol = 1, strip.position = "left") + 
   theme_pubr() + 
@@ -205,11 +183,18 @@ histotype_kd_til_plot <- ggplot(densities_cyto_all, aes(log_density)) +
 densities_bottomrow_plot <- plot_grid(histotype_kd_til_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), ncol = 2, rel_widths = c(0.45, 0.55), labels = c("b", "c"))
 ```
 
-```{r, fig.height = 10, fig.width = 10}
+```{r, fig.height = 5.5, fig.width = 10}
 #| label: fig-densities-tilclust
 #| fig-cap: "Clusters and association with survival"
 #| fig-alt: "Clusters and association with survival"
-plot_grid(densities_tilclust_plot, densities_bottomrow_plot, nrow = 2, ncol = 1, rel_heights = c(0.55, 0.45), labels = c("a", ""))
+plot_grid(densities_tilclust_plot)
+#plot_grid(densities_tilclust_plot, densities_bottomrow_plot, nrow = 2, ncol = 1, rel_heights = c(0.55, 0.45), labels = c("a", ""))
+```
+
+```{r, fig.width=7, fig.height=4}
+#| label: fig-kd-histotype
+#| fig-cap: "Histotype TIL kernel density plot"
+histotype_kd_til_plot
 ```
 
 ```{r, fig.width = 6.5, fig.height = 6}
@@ -225,7 +210,10 @@ density_cormat <- density_cormat[density_hc$order, density_hc$order]
 density_hc2 <- hclust(dist(density_cormat))
 density_cormat[lower.tri(density_cormat)] <- NA
 
-pheatmap::pheatmap(density_cormat, color = colorRampPalette(c("white", "red"))(100), breaks = seq(0, 1, 0.01), na_col = "#FFFFFF", heatmap_legend_param = list(title = "Correlation"), cluster_cols = density_hc2, cluster_rows = FALSE, border_color = NA)
+density_cormat_display <- round(density_cormat, 2)
+density_cormat_display[is.na(density_cormat_display)] <- ""
+
+pheatmap::pheatmap(density_cormat, color = colorRampPalette(c("white", "red"))(100), breaks = seq(0, 1, 0.01), na_col = "#FFFFFF", heatmap_legend_param = list(title = "Correlation"), cluster_cols = density_hc2, cluster_rows = FALSE, border_color = NA, display_numbers = density_cormat_display)
 ```
 
 ```{r, fig.width = 6, fig.height = 6}
@@ -258,28 +246,51 @@ cox_tables_merged <- tbl_merge(tbls = cox_tables,
 cox_tables_merged %>% as_flex_table()
 ```
 
+```{r}
+cox_tables_tiltype <- lapply(cox_fits_by_tiltype, function(cox_fits_for_surv) {
+  cox_tables_for_surv <- lapply(sort(names(cox_fits_for_surv)), function(tiltype) {
+    cox_table <- cox_fits_for_surv[[tiltype]] %>% tbl_regression(exponentiate = TRUE, pvalue_fun = function(x) style_pvalue(x, digits = 2), include = tiltype)
+    return(cox_table)
+  })
+  tbl_stack(cox_tables_for_surv)
+})
 
-```{r, fig.width = 8, fig.height = 8}
-#| label: fig-km-stage
-surv_outcome <- "os"
-km_all_plot <- km_fits[[surv_outcome]]$all$plot
-km_all_plot$labels$title <- str_replace(km_all_plot$labels$title, "Stage all", "Overall survival")
-top_plot <- plot_grid(km_fits[[surv_outcome]]$I$plot,
-                      km_fits[[surv_outcome]]$II$plot,
-                      km_fits[[surv_outcome]]$III$plot,
-                      km_fits[[surv_outcome]]$IV$plot,
-                      ncol = 2, labels = c("b", "c", "d", "e"))
-plot_grid(km_all_plot, top_plot, cluster_legend, nrow = 3, rel_heights = c(1.5, 1.5, 0.1), labels = c("a", "", ""))
+cox_tables_tiltype_merged <- tbl_merge(tbls = cox_tables_tiltype,
+          tab_spanner = c("Overall survival", "Progression-free survival", "Disease-specific survival"))
 ```
 
+```{r}
+cox_tables_tiltype_merged %>% as_flex_table()
+```
 
 ```{r, fig.width = 8, fig.height = 4}
-#| label: suppfig-km-chemo
 surv_outcome2 <- "dss"
-plot_grid(km_chemo_fits[[surv_outcome2]][[1]]$plot,
-          km_chemo_fits[[surv_outcome2]][[2]]$plot,
-          ncol = 2, labels = "auto")
+# chemo_row <- plot_grid(km_chemo_fits[[surv_outcome2]][[2]]$plot + ylab("Disease-specific survival"),
+#                        km_chemo_fits[[surv_outcome2]][[1]]$plot + ylab("Disease-specific survival"),
+#                        ncol = 2, labels = c("f", "g"))
 ```
+
+```{r, fig.width = 9, fig.height = 13}
+#| label: fig-km-stage
+surv_outcome <- "os"
+km_all_plot <- km_fits[[surv_outcome]]$all$plot + ylab("OS")
+km_all_plot$labels$title <- str_replace(km_all_plot$labels$title, "Stage all", "All patients")
+top_plot <- plot_grid(
+  km_all_plot,
+  km_fits[[surv_outcome]]$I$plot + ylab("OS"),
+  km_fits[[surv_outcome]]$II$plot + ylab("OS"),
+  km_fits[[surv_outcome]]$III$plot + ylab("OS"),
+  km_fits[[surv_outcome]]$IV$plot + ylab("OS"),
+  km_chemo_fits[[surv_outcome2]][[2]]$plot + ylab("DSS"),
+  km_chemo_fits[[surv_outcome2]][[1]]$plot + ylab("DSS"),
+  histotype_kd_til_plot,
+  ncol = 2, labels = c("auto"))
+
+plot_grid(top_plot, cluster_legend, nrow = 2, rel_heights = c(3.0, 0.1))
+```
+
+
+
 
 
 ```{r}

@@ -16,11 +16,24 @@ library(flextable)
 
 
 ```{r}
-cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant)) %>% as.data.frame, 
+columns_to_count <- c("Stage", "Grade", "Histotype", "LVI", "Nodes", "Myo", "Chemotherapy", "Radiotherapy", "Brachytherapy")
+metatable_full_unique <- metatable_full %>%
+  dplyr::select(-c(TMA, `B & T`, `Adaptive Resistance`, Cohort)) %>%
+  unique
+
+renamed_columns <- lapply(columns_to_count, function(x) {
+  count_t <- table(metatable_full_unique[,x])
+  count_n <- names(count_t)
+  count_v <- unname(count_t)
+  
+  list(labels = paste0(paste(count_n, count_v, sep = " (n="), ")"))
+})
+names(renamed_columns) <- columns_to_count
+
+cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant, Subtype, Cohort)) %>% as.data.frame, 
                                        col = list(
-                                         Cohort=palette_cohort,
+                                         #Cohort=palette_cohort,
                                          Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("lightgray", "#2E294E")),
-                                         Subtype=palette_subtype,
                                          Grade=palette_grade,
                                          Histotype=palette_histotype,
                                          LVI=palette_lvi,
@@ -31,11 +44,14 @@ cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(
                                          Radiotherapy=palette_binary,
                                          Brachytherapy=palette_binary,
                                          Stage=palette_stage
-                                       ), na_col = "white")
+                                       ), 
+                                       na_col = "white",
+                                       annotation_legend_param = renamed_columns
+)
 
-cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(TMA, `B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
+cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(`B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
                                     col = list(
-                                      TMA=palette_tma,
+                                      #TMA=palette_tma,
                                       `B & T`=palette_binary,
                                       #Angiogenesis=palette_binary,
                                       `Adaptive Resistance`=palette_binary
@@ -47,7 +63,8 @@ cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(TMA,
 #| fig-cap: "Cohort overview"
 #| fig-alt: "Cohort overview. Find out what's going on with angiogenesis."
 cohort_track <- Heatmap(matrix(nc = nrow(metatable_full), nr = 0), 
-	top_annotation = cohort_plot_top, bottom_annotation = cohort_plot_bottom)
+	#top_annotation = cohort_plot_top, bottom_annotation = cohort_plot_bottom)
+	bottom_annotation = cohort_plot_bottom)
 
 draw(cohort_track, annotation_legend_side = "bottom")
 ```
