@@ -18,6 +18,10 @@ results/old
 tikz*.tex
 *.nc
 tmp/
+research_notes.docx
+comments/
+submission/
+drafts/
 
 .quarto/
 paper/figure/
