@@ -52,7 +52,7 @@ clinical_annotations_comb_tma <- metatable_full %>%
 
 her2_status <- her2_ihc %>% 
   select(acc_num, her2_ihc, sWGS) %>%
-  rename(`HER2 CN`=sWGS, `HER2 IHC`=her2_ihc)
+  dplyr::rename(`HER2 CN`=sWGS, `HER2 IHC`=her2_ihc)
 
 overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
   left_join(vessel_df_comb_tma) %>%
@@ -64,7 +64,7 @@ overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
 mat <- (density_final_input %>% na.omit) %>% scale
 
 col_anno <- (overall_annotations_comb_tma %>% 
-               rename(Cluster=clust_map,
+               dplyr::rename(Cluster=clust_map,
                       `Vessel density`=frac_vessel_stroma) %>%
                select(-c(frac_vessel_all, count_pct, `HER2 IHC`, `HER2 CN`, `Vessel density`)) %>%
                column_to_rownames("acc_num"))[rownames(mat),]
@@ -131,11 +131,11 @@ densities_labeled <- densities_final %>%
 
 densities_cyto <- densities_labeled %>% 
   filter(variable %in% c("tcyto", "tcyto_pd1neg", "tcyto_pd1pos")) %>%
-  rename(cyto_density=density)
+  dplyr::rename(cyto_density=density)
 
 densities_treg <- densities_labeled %>% 
   filter(variable %in% c("treg")) %>%
-  rename(treg_density=density) %>%
+  dplyr::rename(treg_density=density) %>%
   select(c(acc_num, region, treg_density))
 
 densities_cyto_treg <- densities_cyto %>%

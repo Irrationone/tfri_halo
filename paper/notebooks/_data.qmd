@@ -107,7 +107,7 @@ metatable_bt <- bt %>%
   mutate(`B & T` = TRUE,
          tma=str_replace_all(tma, "[AB]$", "")) %>%
   unique %>%
-  rename(TMA=tma) %>%
+  dplyr::rename(TMA=tma) %>%
   mutate(
     TMA = factor(TMA, levels = c("10-005", "10-006", "22-004"))
   )
@@ -118,7 +118,7 @@ metatable_angio <- angio %>%
   mutate(angiogenesis = TRUE,
          tma=str_replace_all(tma, "[AB]$", "")) %>%
   unique %>%
-  rename(TMA=tma) %>%
+  dplyr::rename(TMA=tma) %>%
   mutate(
     TMA = factor(TMA, levels = c("10-005", "10-006", "22-004"))
   )
@@ -128,7 +128,7 @@ metatable_ar <- ar_pheno %>%
   mutate(`Adaptive Resistance` = TRUE,
          tma=str_replace_all(tma, "[AB]$", "")) %>%
   unique %>%
-  rename(TMA=tma) %>%
+  dplyr::rename(TMA=tma) %>%
   mutate(
     TMA = factor(TMA, levels = c("10-005", "10-006", "22-004"))
   )
@@ -138,7 +138,7 @@ metatable_ar_area <- ar_area %>%
   mutate(`Adaptive Resistance` = TRUE,
          tma=str_replace_all(tma, "[AB]$", "")) %>%
   unique %>%
-  rename(TMA=tma) %>%
+  dplyr::rename(TMA=tma) %>%
   mutate(
     TMA = factor(TMA, levels = c("10-005", "10-006", "22-004"))
   )
@@ -146,7 +146,7 @@ metatable_ar_area <- ar_area %>%
 metatable_clinical <- clinical %>%
   dplyr::select(cohort, acc_num, age_dx, eclass2_ngs, stage_full, stage_main, grade_rev, hist_rev, lvi, nodes, myo, neoadj, chemo, rt, brachy) %>%
   unique %>%
-  rename(Cohort=cohort, Subtype=eclass2_ngs, Age=age_dx, Stage=stage_main, Grade=grade_rev, Histotype=hist_rev,
+  dplyr::rename(Cohort=cohort, Subtype=eclass2_ngs, Age=age_dx, Stage=stage_main, Grade=grade_rev, Histotype=hist_rev,
          LVI=lvi, Nodes=nodes, Myo=myo, Neoadjuvant=neoadj, Chemotherapy=chemo, Radiotherapy=rt, Brachytherapy=brachy) %>%
   mutate(
     LVI = dplyr::recode(LVI, 'negative'='-', 'positive'='+ (unspecified)', 'focal'='+ (focal)', 'extensive'='+ (extensive)'),
@@ -253,7 +253,7 @@ clinical_long <- clinical %>%
          yrs = as.numeric(yrs),
          sts = (sts == "event")) %>%
   filter(!is.na(yrs)) %>%
-  rename(time=yrs,
+  dplyr::rename(time=yrs,
          status=sts) %>%
   ## time == 0 not allowed in cox model
   filter(time > 0)
@@ -309,7 +309,7 @@ densities_final_wide <- densities_final %>%
   pivot_wider(names_from = variable_full, values_from = log_density)
 
 density_final_input <- densities_final_wide %>% 
-  rename(
+  dplyr::rename(
     `Stromal: Plasma`=bcell_cd20neg_stroma,
     `Epithelial: Plasma`=bcell_cd20neg_tumour,
     `Stromal: B`=bcell_cd20pos_stroma,
@@ -485,7 +485,7 @@ unique_outcomes <- c("os", "pfs", "dss")
 cox_fits <- lapply(unique_outcomes, function(x) {
   df <- clinical_long_clust_assignments %>% 
     filter(outcome == x) %>%
-    rename(
+    dplyr::rename(
       Age=age_dx,
       TIL=clust_map,
       Chemotherapy=chemo,
@@ -508,7 +508,7 @@ cox_fits_cs <- lapply(unique_outcomes, function(x) {
     mutate(
       Carcinosarcoma = (hist_rev == "carcinosarcoma (MMMT)")
     ) %>%
-    rename(
+    dplyr::rename(
       Age=age_dx,
       TIL=clust_map,
       Chemotherapy=chemo,
@@ -531,7 +531,7 @@ clinical_til_densities <- clinical_long_clust_assignments %>%
 cox_fits_by_tiltype <- lapply(unique_outcomes, function(x) {
   df <- clinical_til_densities %>% 
     filter(outcome == x) %>%
-    rename(
+    dplyr::rename(
       Age=age_dx,
       TIL=clust_map,
       Chemotherapy=chemo,
@@ -798,7 +798,7 @@ ploidy_cellularity <- read_csv(ploidy_cellularity_file) %>%
   ))
 
 her2_ihc <- read_xlsx(her2_ihc_file) %>%
-  rename(sample=samples_id, her2_ihc=`IHC score`, her2_percent_pos=`% when 2 /3+`) %>%
+  dplyr::rename(sample=samples_id, her2_ihc=`IHC score`, her2_percent_pos=`% when 2 /3+`) %>%
   filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
   mutate(id = case_when(
     str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),
@@ -809,7 +809,7 @@ her2_ihc <- read_xlsx(her2_ihc_file) %>%
   select(sample, id, her2_ihc, her2_percent_pos, sWGS, ploidy)
 
 p53abn_cohort_track <- read_xlsx(p53abn_cohort_track_file) %>%
-  rename(sample=sample_id) %>%
+  dplyr::rename(sample=sample_id) %>%
   filter(!str_detect(sample, "^(IM|JBLAB)")) %>%
   mutate(id = case_when(
     str_detect(sample, "^VS") ~ str_extract(sample, "[^-]*\\-[^-]*"),

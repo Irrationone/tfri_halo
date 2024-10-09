@@ -1,0 +1,83 @@
+
+```{r, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+library(readxl)
+library(pixiedust)
+
+here::i_am("paper/scripts/id_mapping.qmd")
+```
+
+```{r, warning=FALSE, include=FALSE}
+# Clinical
+clinical_data_path <- here::here("data", "processed", "clinical_data.tsv")
+
+# B & T 
+bt_data_path <- here::here("data", "processed", "bt_labeled.tsv")
+
+# Adaptive resistance 
+ar_pheno_data_path <- here::here("data", "processed", "ar_pheno_labeled.tsv")
+ar_area_data_path <- here::here("data", "processed", "ar_area_labeled.tsv")
+
+# Angio (areas only now)
+angio_data_path <- here::here("data", "processed", "angio_labeled.tsv")
+```
+
+
+```{r, warning=FALSE, include=FALSE}
+clinical <- read_tsv(clinical_data_path)
+clinical <- clinical %>%
+  dplyr::mutate(
+    grade_rev=str_extract(grade_rev, "[0-9]+")
+  )
+
+bt <- read_tsv(bt_data_path)
+
+ar_pheno <- read_tsv(ar_pheno_data_path)
+ar_area <- read_tsv(ar_area_data_path)
+
+angio <- read_tsv(angio_data_path)
+```
+
+```{r}
+unique_accessions <- unique(c(clinical$acc_num, bt$acc_num, ar_pheno$acc_num, ar_area$acc_num, angio$acc_num))
+
+accession_map <- data.frame(
+  acc_num = unique_accessions, 
+  unique_id=paste0("ID", as.character(1:length(unique_accessions)))
+)
+
+bt_for_output <- bt %>% 
+  dplyr::left_join(accession_map) %>%
+  dplyr::select(-c(acc_num)) %>%
+  dplyr::select(unique_id, everything())
+
+ar_pheno_for_output <- ar_pheno %>% 
+  dplyr::left_join(accession_map) %>%
+  dplyr::select(-c(acc_num)) %>%
+  dplyr::select(unique_id, everything())
+
+ar_area_for_output <- ar_area %>% 
+  dplyr::left_join(accession_map) %>%
+  dplyr::select(-c(acc_num)) %>%
+  dplyr::select(unique_id, everything())
+
+angio_for_output <- angio %>% 
+  dplyr::left_join(accession_map) %>%
+  dplyr::select(-c(acc_num)) %>%
+  dplyr::select(unique_id, everything())
+
+clinical_for_output <- clinical %>% 
+  dplyr::left_join(accession_map) %>%
+  dplyr::select(-c(acc_num, patient_id, study_id)) %>%
+  dplyr::select(unique_id, everything())
+```
+
+```{r}
+write_tsv(accession_map, file = here::here("data", "anonymized", "accession_map.tsv"))
+write_tsv(bt_for_output, file = here::here("data", "anonymized", "B_T.tsv"))
+write_tsv(ar_pheno_for_output, file = here::here("data", "anonymized", "AR_pheno.tsv"))
+write_tsv(ar_area_for_output, file = here::here("data", "anonymized", "AR_area.tsv"))
+write_tsv(angio_for_output, file = here::here("data", "anonymized", "angio.tsv"))
+write_tsv(clinical_for_output, file = here::here("data", "anonymized", "clinical.tsv"))
+```

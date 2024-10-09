@@ -52,6 +52,36 @@ cnsig_boxplots <- ggplot(cnsig_merged_long, aes(x=clust_map, y=exposure)) +
   ylab("Exposure") + 
   labs(fill = "Cluster") + 
   guides(fill = guide_legend(override.aes = list(alpha = 1)))
+
+cnsig_boxplots_no_vs5 <- ggplot(cnsig_merged_long %>% filter(signature != "VS5"), aes(x=clust_map, y=exposure)) + 
+  geom_boxplot(aes(fill=clust_map), alpha = 0.4, width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
+  theme_pubr() + 
+  scale_fill_manual(values = palette_tilclust) + 
+  facet_wrap(~ signature, scales = "free_y", ncol = 5) +
+  #stat_compare_means(vjust = 0.7, size = 3)# + 
+  #stat_compare_means(comparisons = list(c("Low TIL", "High TIL"))) + 
+  theme(strip.background =element_rect(fill="white")) +
+  stat_pvalue_manual(data = cnsig_pvals %>% filter(signature != "VS5"), label = "p.final", y.position = 0.9, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
+  xlab("") + 
+  ylab("Exposure") + 
+  labs(fill = "Cluster") + 
+  guides(fill = guide_legend(override.aes = list(alpha = 1)))
+
+cnsig_vs5 <- ggplot(cnsig_merged_long %>% filter(signature == "VS5"), aes(x=clust_map, y=exposure)) +
+  geom_boxplot(aes(fill=clust_map), alpha = 0.4, width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.3) + 
+  theme_pubr() + 
+  scale_fill_manual(values = palette_tilclust) + 
+  #stat_compare_means(vjust = 0.7, size = 3)# + 
+  #stat_compare_means(comparisons = list(c("Low TIL", "High TIL"))) + 
+  stat_pvalue_manual(data = cnsig_pvals %>% filter(signature == "VS5"), label = "p.final", y.position = 0.9, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
+  xlab("") + 
+  ylab("Exposure") + 
+  labs(fill = "Cluster") + 
+  guides(fill = guide_legend(override.aes = list(alpha = 1))) + 
+  ggtitle("HRD CN signature") + 
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5))
 ```
 
 ```{r}
@@ -106,17 +136,80 @@ her2_swgs_plot <- ggplot(her2_ihc_clust_assignments %>%
   ylab("Samples")
 ```
 
-```{r, fig.width = 10, fig.height = 10}
+```{r}
+## Overview plot by marker type
+signature_summary <- cnsig_merged_long %>% 
+  dplyr::select(c(patient_id, study_id, acc_num, max_van_sig)) %>% 
+  unique %>% 
+  dplyr::mutate(
+    `HRD CN signature` = (max_van_sig == "VS5")
+  )
+
+her2_summary <- her2_ihc_clust_assignments %>% 
+  dplyr::select(c(acc_num, clust_map, patient_id, study_id, her2_ihc, sWGS, ploidy)) %>%
+  unique %>%
+  dplyr::mutate(
+    HER2=(sWGS %in% c("Amplification", "High Amplification")) | (her2_ihc == 3)
+  )
+
+biomarker_summary <- signature_summary %>% 
+  dplyr::full_join(her2_summary) %>%
+  dplyr::rename(TIL=clust_map) %>%
+  dplyr::mutate(
+    HER2=factor(dplyr::recode(as.character(HER2), 'FALSE'='Negative', 'TRUE'='Positive'), levels = c('Positive', 'Negative')),
+    `HRD CN signature`=factor(dplyr::recode(as.character(`HRD CN signature`), 'FALSE'='Negative', 'TRUE'='Positive'), levels = c('Positive', 'Negative'))
+  ) %>%
+  dplyr::filter(!is.na(HER2), !is.na(`HRD CN signature`)) %>%
+  dplyr::arrange(`HRD CN signature`, HER2, desc(TIL))
+
+paste0("(", round(with(biomarker_summary, sum(as.numeric(HER2 == "Yes"), na.rm=TRUE)/sum(!is.na(HER2), na.rm=TRUE)), 2) * 100, "%)")
+
+biomarker_labels_quantified <- c(
+  "TIL",
+  paste0("HRD CN signature ", "(", round(with(biomarker_summary, sum(as.numeric(`HRD CN signature` == "Positive"), na.rm=TRUE)/sum(!is.na(`HRD CN signature`), na.rm=TRUE)), 2) * 100, "%)"),
+  paste0("HER2 ", "(", round(with(biomarker_summary, sum(as.numeric(HER2 == "Positive"), na.rm=TRUE)/sum(!is.na(HER2), na.rm=TRUE)), 2) * 100, "%)")
+)
+
+positive_palette <- palette_binary
+names(positive_palette) <- c("Positive", "Negative")
+
+biomarker_annotation <- columnAnnotation(df = biomarker_summary %>% dplyr::select(c(TIL, `HRD CN signature`, HER2)) %>% as.data.frame, 
+                                       col = list(
+                                         TIL=palette_tilclust,
+                                         `HRD CN signature`=positive_palette,
+                                         HER2=positive_palette
+                                       ), 
+                                       na_col = "white",
+                                       show_legend = c(FALSE, TRUE, TRUE), 
+                                       annotation_label = biomarker_labels_quantified,
+                                       annotation_legend_param = lapply(biomarker_labels_quantified, function(x) {
+                                         list(title = str_replace(x, " \\(.*", ""))
+                                       })
+)
+
+biomarker_track <- Heatmap(matrix(nc = nrow(biomarker_summary), nr = 0), 
+	bottom_annotation = biomarker_annotation)
+
+biomarker_heatmap_plot <-grid::grid.grabExpr(draw(biomarker_track, heatmap_legend_side = "bottom", annotation_legend_side="bottom", legend_grouping = "original", merge_legend = TRUE, align_heatmap_legend = "heatmap_center"), width = 10, height = 8)
+```
+
+```{r, fig.width = 10, fig.height = 7}
 #| label: fig-mutational-signatures
 #| fig-cap: "Mutational signatures"
 #| fig-alt: "Mutational signatures"
 
-legend <- get_legend(cnsig_boxplots)
+legend <- get_legend(cnsig_boxplots_no_vs5)
 
-her2_row <- plot_grid(her2_ihc_plot, her2_swgs_plot, ncol = 2, labels = c("c", "d"), rel_widths = c(0.45, 0.55))
+her2_row <- plot_grid(cnsig_vs5, her2_ihc_plot, her2_swgs_plot, ncol = 3, labels = c("b", "c", "d"), rel_widths = c(0.4, 0.45, 0.55))
 
-plot_grid(legend, cnsig_heatmap_plot, cnsig_boxplots + theme(legend.position = "none"), her2_row, nrow = 4, labels = c("", "a", "b", ""), rel_heights = c(0.1, 0.6, 0.4, 0.6))
+plot_grid(legend, biomarker_heatmap_plot, her2_row, nrow = 3, labels = c("a", "", ""), rel_heights = c(0.1, 0.4, 0.6))
 ```
+
+```{r, fig.width = 10, fig.height = 7}
+## Supplemental Figure
+plot_grid(legend, cnsig_heatmap_plot, cnsig_boxplots_no_vs5 + theme(legend.position = "none"), nrow = 3, labels = c("", "a", "b", ""), rel_heights = c(0.1, 0.6, 0.6))
+```
+
 
 ```{r}
 ## TESTS

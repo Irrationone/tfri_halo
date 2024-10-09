@@ -17,8 +17,27 @@ library(flextable)
 
 ```{r}
 columns_to_count <- c("Stage", "Grade", "Histotype", "LVI", "Nodes", "Myo", "Chemotherapy", "Radiotherapy", "Brachytherapy")
+
+palette_grade_missing <- c(palette_grade, "Missing"="#FFFFFF")
+palette_lvi_missing <- c(palette_lvi, "Missing"="#FFFFFF")
+palette_nodes_missing <- c(palette_nodes, "Missing"="#FFFFFF")
+palette_myo_missing <- c(palette_myo, "Missing"="#FFFFFF")
+palette_stage_missing <- c(palette_stage, "Missing"="#FFFFFF")
+
 metatable_full_unique <- metatable_full %>%
   dplyr::select(-c(TMA, `B & T`, `Adaptive Resistance`, Cohort)) %>%
+  dplyr::mutate(across(c("Grade", "Histotype", "LVI", "Nodes", "Myo", "Chemotherapy", "Brachytherapy", "Stage"), ~replace_na(as.character(.x), "Missing"))) %>%
+  dplyr::mutate(
+    Histotype = factor(Histotype, levels = names(palette_histotype)),
+    Grade = factor(Grade, levels = names(palette_grade_missing)),
+    LVI = factor(LVI, levels = names(palette_lvi_missing)),
+    Nodes = factor(Nodes, levels = names(palette_nodes_missing)),
+    Myo = factor(Myo, levels = names(palette_myo_missing)),
+    Chemotherapy = factor(Chemotherapy, levels = names(palette_binary)),
+    Radiotherapy = factor(Radiotherapy, levels = names(palette_binary)),
+    Brachytherapy = factor(Brachytherapy, levels = names(palette_binary)),
+    Stage = factor(Stage, levels = names(palette_stage_missing))
+  ) %>%
   unique
 
 renamed_columns <- lapply(columns_to_count, function(x) {
@@ -30,26 +49,28 @@ renamed_columns <- lapply(columns_to_count, function(x) {
 })
 names(renamed_columns) <- columns_to_count
 
-cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant, Subtype, Cohort)) %>% as.data.frame, 
+cohort_df_unique <- metatable_full_unique %>% dplyr::select(-c(acc_num, Neoadjuvant, Subtype)) %>% as.data.frame
+
+cohort_plot_bottom <- columnAnnotation(df = cohort_df_unique, 
                                        col = list(
                                          #Cohort=palette_cohort,
                                          Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("lightgray", "#2E294E")),
-                                         Grade=palette_grade,
+                                         Grade=palette_grade_missing,
                                          Histotype=palette_histotype,
-                                         LVI=palette_lvi,
-                                         Nodes=palette_nodes,
-                                         Myo=palette_myo,
+                                         LVI=palette_lvi_missing,
+                                         Nodes=palette_nodes_missing,
+                                         Myo=palette_myo_missing,
                                          #Neoadjuvant=palette_neoadjuvant,
                                          Chemotherapy=palette_binary,
                                          Radiotherapy=palette_binary,
                                          Brachytherapy=palette_binary,
-                                         Stage=palette_stage
+                                         Stage=palette_stage_missing
                                        ), 
                                        na_col = "white",
                                        annotation_legend_param = renamed_columns
 )
 
-cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(`B & T`, `Adaptive Resistance`)) %>% as.data.frame, 
+cohort_plot_top <- columnAnnotation(df = cohort_df_unique, 
                                     col = list(
                                       #TMA=palette_tma,
                                       `B & T`=palette_binary,
@@ -62,7 +83,7 @@ cohort_plot_top <- columnAnnotation(df = metatable_full %>% dplyr::select(c(`B &
 #| label: fig-cohort-track
 #| fig-cap: "Cohort overview"
 #| fig-alt: "Cohort overview. Find out what's going on with angiogenesis."
-cohort_track <- Heatmap(matrix(nc = nrow(metatable_full), nr = 0), 
+cohort_track <- Heatmap(matrix(nc = nrow(metatable_full_unique %>% dplyr::select(-c(acc_num, Neoadjuvant, Subtype)) %>% as.data.frame), nr = 0), 
 	#top_annotation = cohort_plot_top, bottom_annotation = cohort_plot_bottom)
 	bottom_annotation = cohort_plot_bottom)
 
