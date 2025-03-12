@@ -61,6 +61,13 @@ overall_annotations_comb_tma <- clinical_annotations_comb_tma %>%
 
 
 ```{r, fig.width=10, fig.height=8}
+capitalize_names <- function(x) {
+  str_to_sentence(x) %>% str_replace_all("mmmt", "MMMT")
+}
+
+palette_histotype_capitalized <- palette_histotype
+names(palette_histotype_capitalized) <- capitalize_names(names(palette_histotype_capitalized))
+
 mat <- (density_final_input %>% na.omit) %>% scale
 
 col_anno <- (overall_annotations_comb_tma %>% 
@@ -70,8 +77,16 @@ col_anno <- (overall_annotations_comb_tma %>%
                column_to_rownames("acc_num"))[rownames(mat),]
 
 mat <- mat[which(col_anno$Subtype == "p53abn" & !is.na(col_anno$Cluster)),] %>% scale
+mat_onlyserous <- mat[which(col_anno$Subtype == "p53abn" & !is.na(col_anno$Cluster) & col_anno$Histotype == "serous"),] %>% scale
+
 col_anno <- col_anno[rownames(mat),]
-col_anno <- col_anno[,!str_detect(colnames(col_anno), "Subtype")]
+col_anno <- col_anno[,!str_detect(colnames(col_anno), "Subtype")] %>%
+  dplyr::mutate(
+    Histotype = factor(capitalize_names(Histotype), levels = intersect(names(palette_histotype_capitalized), unique(capitalize_names(Histotype))))
+  )
+
+col_anno_onlyserous <- col_anno[rownames(mat_onlyserous),] %>%
+  dplyr::select(-c(Histotype))
 
 ha <- columnAnnotation(df = col_anno, annotation_width = 0.02, 
                        col = list(
@@ -79,7 +94,16 @@ ha <- columnAnnotation(df = col_anno, annotation_width = 0.02,
                          #`Vessel density`=colorRamp2(c(0, 1), c("white", "red")),
                          Cohort=palette_cohort,
                          Grade=palette_grade,
-                         Histotype=palette_histotype,
+                         Histotype=palette_histotype_capitalized,
+                         Stage=palette_stage
+                       ))
+
+ha_onlyserous <- columnAnnotation(df = col_anno_onlyserous, annotation_width = 0.02, 
+                       col = list(
+                         Cluster=palette_tilclust,
+                         #`Vessel density`=colorRamp2(c(0, 1), c("white", "red")),
+                         Cohort=palette_cohort,
+                         Grade=palette_grade,
                          Stage=palette_stage
                        ))
 
@@ -99,8 +123,26 @@ density_heatmap <- Heatmap(mat %>% t,
                              title = "Density"
                            ))
 
+density_heatmap_onlyserous <- Heatmap(mat_onlyserous %>% t,
+                           na_col = "gray",
+                           column_names_gp = gpar(fontsize = 6), 
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           clustering_method_columns = "ward.D2",
+                           clustering_method_rows = "ward.D2",
+                           column_names_rot = 60, 
+                           show_column_names = FALSE, 
+                           column_split = col_anno_onlyserous$Cluster,
+                           column_title = NULL,
+                           top_annotation = ha_onlyserous,
+                           heatmap_legend_param = list(
+                             title = "Density"
+                           ))
+
 
 densities_tilclust_plot <-grid::grid.grabExpr(draw(density_heatmap, heatmap_legend_side = "bottom", annotation_legend_side="bottom", legend_grouping = "original", merge_legend = TRUE, align_heatmap_legend = "heatmap_center"), width = 10, height = 8)
+
+densities_tilclust_plot_onlyserous <-grid::grid.grabExpr(draw(density_heatmap_onlyserous, heatmap_legend_side = "bottom", annotation_legend_side="bottom", legend_grouping = "original", merge_legend = TRUE, align_heatmap_legend = "heatmap_center"), width = 8, height = 6)
 ```
 
 
@@ -153,7 +195,8 @@ cd8_treg_ratio_plot <- ggplot(densities_cyto_treg %>% filter(cyto_density > 0, t
   theme_pubr() + 
   facet_wrap(~ region, ncol = 2) +
   scale_y_log10() + 
-  theme(strip.background =element_rect(fill="white")) +
+  theme(strip.background =element_rect(fill="white"), legend.title = element_text(size = 9),
+        legend.text = element_text(size = 8)) +
   stat_pvalue_manual(data = cd8_treg_pvals, label = "p = {scales::pvalue(p.adj)}", y.position = 2, vjust=1.2, size = 3, bracket.size = 0) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
@@ -169,21 +212,24 @@ densities_cyto_all <- densities_cyto %>%
   filter(variable %in% c("tcyto"),
          region == "tumour")
 
-histotype_kd_til_plot <- ggplot(densities_cyto_all %>% dplyr::mutate(Histotype=dplyr::recode(Histotype, "carcinosarcoma (MMMT)"="carcinosarcoma")), aes(log_density)) + 
+histotype_kd_til_plot <- ggplot(densities_cyto_all %>% dplyr::mutate(Histotype=dplyr::recode(Histotype, "carcinosarcoma (MMMT)"="carcinosarcoma") %>% capitalize_names() %>% factor(levels = c("Carcinosarcoma", "Clear cell", "Endometrioid", "Mixed", "Serous", "Other"))), aes(log_density)) + 
   geom_density() + 
   facet_wrap(~ Histotype, ncol = 1, strip.position = "left") + 
   theme_pubr() + 
   theme(axis.line.y = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
-        strip.text.y.left = element_text(angle = 0, hjust = 1),  strip.background.y = element_blank(), strip.placement = "outside") + 
+        axis.text.x = element_text(size = 7),
+        axis.title.x = element_text(size = 9),
+        plot.title = element_text(size = 11),
+        strip.text.y.left = element_text(angle = 0, hjust = 1, size = 9),  strip.background.y = element_blank(), strip.placement = "outside") + 
   xlab("log(Epithelial CD8+ TIL density)") + 
   ylab("")
 
 densities_bottomrow_plot <- plot_grid(histotype_kd_til_plot, cd8_treg_ratio_plot + theme(legend.position = "none"), ncol = 2, rel_widths = c(0.45, 0.55), labels = c("b", "c"))
 ```
 
-```{r, fig.height = 5.5, fig.width = 10}
+```{r, fig.height = 5, fig.width = 9}
 #| label: fig-densities-tilclust
 #| fig-cap: "Clusters and association with survival"
 #| fig-alt: "Clusters and association with survival"
@@ -270,26 +316,43 @@ surv_outcome2 <- "dss"
 #                        ncol = 2, labels = c("f", "g"))
 ```
 
-```{r, fig.width = 9, fig.height = 13}
+```{r, fig.width = 6.7, fig.height = 10}
 #| label: fig-km-stage
+
+convert_to_grobable <- function(x) {
+  ggarrange(x$plot, x$table, nrow = 2, align = "v", heights = c(0.8, 0.2))
+}
+
 surv_outcome <- "os"
-km_all_plot <- km_fits[[surv_outcome]]$all$plot + ylab("OS")
-km_all_plot$labels$title <- str_replace(km_all_plot$labels$title, "Stage all", "All patients")
+km_all_plot <- km_fits[[surv_outcome]]$all$plot
+km_all_plot$plot$labels$title <- str_replace(km_all_plot$plot$labels$title, "Stage all", "All patients")
 top_plot <- plot_grid(
-  km_all_plot,
-  km_fits[[surv_outcome]]$I$plot + ylab("OS"),
-  km_fits[[surv_outcome]]$II$plot + ylab("OS"),
-  km_fits[[surv_outcome]]$III$plot + ylab("OS"),
-  km_fits[[surv_outcome]]$IV$plot + ylab("OS"),
-  km_chemo_fits[[surv_outcome2]][[2]]$plot + ylab("DSS"),
-  km_chemo_fits[[surv_outcome2]][[1]]$plot + ylab("DSS"),
+  convert_to_grobable(km_all_plot),
+  convert_to_grobable(km_fits[[surv_outcome]]$I$plot),
+  convert_to_grobable(km_fits[[surv_outcome]]$II$plot),
+  convert_to_grobable(km_fits[[surv_outcome]]$III$plot),
+  convert_to_grobable(km_fits[[surv_outcome]]$IV$plot),
+  convert_to_grobable(km_chemo_fits[[surv_outcome2]][[2]]$plot),
+  convert_to_grobable(km_chemo_fits[[surv_outcome2]][[1]]$plot),
   histotype_kd_til_plot,
-  ncol = 2, labels = c("auto"))
+  ncol = 2, labels = c("AUTO"), label_size = 12)
 
 plot_grid(top_plot, cluster_legend, nrow = 2, rel_heights = c(3.0, 0.1))
 ```
 
-
+```{r, fig.width = 6.7, fig.height = 10}
+surv_outcome <- "os"
+p53_km_plot <- plot_grid(
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$I$`FALSE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$I$`TRUE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$II$`FALSE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$II$`TRUE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$III$`FALSE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$III$`TRUE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$IV$`FALSE`$plot),
+  convert_to_grobable(km_stage_p53_fits[[surv_outcome]]$IV$`TRUE`$plot),
+  ncol = 2, labels = c("AUTO"), label_size = 12)
+```
 
 
 
@@ -304,3 +367,80 @@ ggplot(vessel_clustmap, aes(x=clust_map, y=frac_vessel_stroma)) +
   stat_compare_means() + 
   scale_fill_manual(values = palette_tilclust)
 ```
+
+
+```{r, fig.width = 8, fig.height = 6}
+plot_grid(densities_tilclust_plot_onlyserous)
+```
+
+
+```{r}
+bt_carcinosarcoma_long_filtered <- bt_carcinosarcoma_long %>% 
+  filter(area > 0)
+
+paired_samples <- bt_carcinosarcoma_long_filtered %>%
+  dplyr::group_by(acc_num) %>%
+  dplyr::summarise(unique_components=length(unique(component))) %>%
+  ungroup()
+
+bt_carcinosarcoma_long_filtered_paired <- bt_carcinosarcoma_long_filtered %>%
+  filter(acc_num %in% (paired_samples %>% filter(unique_components == 2))$acc_num)
+
+xy_position <- bt_carcinosarcoma_long_filtered %>%
+  dplyr::mutate(density = log(density+1)) %>%
+  group_by(tiltype) %>%
+  rstatix::wilcox_test(density ~ component) %>%
+  rstatix::add_xy_position(x = "component") %>%
+  ungroup() %>%
+  dplyr::select(tiltype, group1, group2, y.position, xmin, xmax)
+
+paired_wilcox_pvals <- compare_means(formula = density ~ component, method = "wilcox.test", paired = TRUE, group.by = "tiltype", data = bt_carcinosarcoma_long_filtered_paired, p.adjust.method = "holm") 
+  
+unpaired_wilcox_pvals <- compare_means(formula = density ~ component, method = "wilcox.test", paired = FALSE, group.by = "tiltype", data = bt_carcinosarcoma_long_filtered, p.adjust.method = "holm")
+
+all_wilcox_pvals <- paired_wilcox_pvals %>%
+  dplyr::left_join(unpaired_wilcox_pvals, by = c("tiltype", ".y.", "group1", "group2")) %>%
+  dplyr::left_join(xy_position) %>%
+  dplyr::mutate(p.final = paste0("italic(P)[paired]==", p.adj.x, "~~italic(P)[unpaired]==", p.adj.y),
+                y.position = y.position + 1,
+                xmin=xmin-0.2,
+                xmax=xmax-0.2)
+```
+
+```{r, fig.width = 6.7, fig.height = 5}
+carcinosarcoma_til_densities <- ggplot(bt_carcinosarcoma_long_filtered, aes(x=component, y=log(density+1))) + 
+  geom_boxplot(width = 0.5, outlier.size = -1) + 
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.4) + 
+  geom_line(aes(group = acc_num)) + 
+  theme_pubr() + 
+  stat_pvalue_manual(data = all_wilcox_pvals, label = "p.final", xmin = "xmin", xmax="xmax", y.position = "y.position", vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
+  facet_wrap(~ tiltype, scales = "free") + 
+  ylab("TIL density (log-transformed)") + 
+  xlab("Component") + 
+  theme(axis.text = element_text(size = 7),
+        axis.title = element_text(size = 9),
+        plot.title = element_text(size = 11),
+        strip.text = element_text(angle = 0, hjust = 0.5, size = 9, face = "bold"),  strip.background = element_blank(), strip.placement = "outside") + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0)))
+
+carcinosarcoma_til_densities
+```
+
+
+```{r}
+cox_tables_rb <- lapply(cox_fits_rb, function(cox_fit) {
+  cox_table <- cox_fit %>% tbl_regression(exponentiate = TRUE, show_single_row = c("TIL", "RB loss", "Chemotherapy", "Radiotherapy", "Brachytherapy"), pvalue_fun = function(x) style_pvalue(x, digits = 2))
+  
+  return(cox_table)
+})
+
+cox_tables_rb_merged <- tbl_merge(tbls = cox_tables_rb,
+          tab_spanner = c("Overall survival", "Progression-free survival", "Disease-specific survival"))
+```
+
+```{r}
+cox_tables_rb_merged %>% as_flex_table()
+```
+
+
+

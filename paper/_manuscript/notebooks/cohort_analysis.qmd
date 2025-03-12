@@ -16,16 +16,30 @@ library(flextable)
 
 
 ```{r}
-cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant)) %>% as.data.frame, 
+capitalize_names <- function(x) {
+  str_to_sentence(x) %>% str_replace_all("mmmt", "MMMT")
+}
+
+palette_histotype_capitalized <- palette_histotype
+names(palette_histotype_capitalized) <- capitalize_names(names(palette_histotype_capitalized))
+
+palette_myo_capitalized <- palette_myo
+names(palette_myo_capitalized) <- capitalize_names(names(palette_myo_capitalized))
+
+cohort_plot_bottom <- columnAnnotation(df = metatable_full %>% 
+                                         dplyr::select(-c(acc_num, TMA, `B & T`, `Adaptive Resistance`, Neoadjuvant)) %>% 
+                                         dplyr::mutate(Histotype = capitalize_names(Histotype),
+                                                       Myo = capitalize_names(Myo)) %>%
+                                         as.data.frame, 
                                        col = list(
                                          Cohort=palette_cohort,
                                          Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("lightgray", "#2E294E")),
                                          Subtype=palette_subtype,
                                          Grade=palette_grade,
-                                         Histotype=palette_histotype,
+                                         Histotype=palette_histotype_capitalized,
                                          LVI=palette_lvi,
                                          Nodes=palette_nodes,
-                                         Myo=palette_myo,
+                                         Myo=palette_myo_capitalized,
                                          #Neoadjuvant=palette_neoadjuvant,
                                          Chemotherapy=palette_binary,
                                          Radiotherapy=palette_binary,

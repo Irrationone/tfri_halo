@@ -53,7 +53,12 @@ cd8_treg_ratio_plot <- ggplot(bt_densities_cyto_treg %>% filter(cyto_density > 0
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
   geom_point(aes(fill=clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width = 0.5), alpha = 0.2) + 
   theme_pubr() + 
-  scale_y_log10() + 
+  theme(plot.title = element_text(size = 11),
+        axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 7),
+        axis.title.x = element_text(size=9),
+        axis.title.y = element_text(size=9)) + 
+  scale_y_continuous(trans="log10", breaks = c(0.01, 0.1, 1, 10, 100, 1000), limits = c(0.01, 1000)) + 
   stat_pvalue_manual(data = cd8_treg_pvals, label = "p.final", x = "region", y.position = 500, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
@@ -104,7 +109,7 @@ tcyto_densities_plot <- ggplot(densities_labeled_tcyto, aes(x=region, y=log_dens
   xlab("") + 
   ylab("log(TIL density)") + 
   labs(fill = "Cluster") + 
-  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.title = element_text(size = 9), legend.text = element_text(size = 8)) +
   ggtitle("CD8+ T cells")
 
 legend <- get_legend(tcyto_densities_plot)
@@ -113,11 +118,15 @@ mac_densities_plot <- ggplot(densities_labeled_macs, aes(x=region, y=log_density
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
   geom_point(aes(fill = clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width = 0.5), alpha = 0.1) + 
   theme_pubr() + 
-  theme(strip.background =element_rect(fill="white")) +
+  theme(strip.background =element_rect(fill="white"),
+        axis.text = element_text(size = 7),
+        axis.title = element_text(size = 9),
+        plot.title = element_text(size = 11), strip.text = element_text(size = 9)) +
   facet_grid( ~ variable, scales = "free") + 
   #stat_compare_means(vjust = 0.7, size = 3)
   #scale_y_log10() + 
-  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "PDL1")), label = "p.final", x = "region", y.position = 8.5, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
+  stat_pvalue_manual(data = pvals %>% filter(str_detect(variable, "PDL1")), label = "p.final", x = "region", y.position = 10, vjust=1.9, size = 2.5, remove.bracket = TRUE, parse = TRUE) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0)), limits = c(0, 10)) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("log(TIL density)") + 
@@ -139,16 +148,22 @@ pd1pos_prop_plot <- ggplot(pd1pos_pd1neg_ratios %>% mutate(variable = "Proportio
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
   geom_point(aes(fill=clust_map), position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0, dodge.width = 0.5), alpha = 0.1) + 
   theme_pubr() + 
-  theme(strip.background =element_rect(fill="white")) +
+  theme(strip.background =element_rect(fill="white"),
+        axis.text.x = element_text(size = 7),
+        axis.title.x = element_text(size = 9),
+        axis.text.y = element_text(size = 7),
+        axis.title.y = element_text(size = 9),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 11)) +
   #facet_grid(region ~ variable, scales = "free") + 
   #scale_y_log10() + 
   #stat_compare_means() + 
-  stat_pvalue_manual(data = pd1pos_pvals, label = "p.final", x = "region", y.position = 1.3, vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
+  scale_y_continuous(labels = c(0, 0.25, 0.5, 0.75, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), expand = expansion(mult = c(0, 0.1))) + 
+  stat_pvalue_manual(data = pd1pos_pvals, label = "p.final", x = "region", y.position = 1.1,  vjust=1.2, size = 3, remove.bracket = TRUE, parse = TRUE) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("Proportion PD1+") + 
-  theme(legend.position = "none") + 
-  ggtitle("")
+  theme(legend.position = "none", plot.margin = unit(c(16.5, 5.5, 5.5, 5.5), "pt")) + 
+  ggtitle("CD8+ T cells") + coord_cartesian(ylim = c(0, 1), clip = "off")
 ```
 
 
@@ -181,10 +196,14 @@ tumor_pdl1_ido1_plot <- ggplot(ar_area_long_labeled, aes(x=clust_map, y=proporti
   geom_boxplot(aes(fill = clust_map), width = 0.5, outlier.size = -1, alpha = 0.4) + 
   geom_point(position = position_jitter(width = 0.1, height = 0), alpha = 0.1) + 
   theme_pubr() + 
-  theme(strip.background =element_rect(fill="white")) +
+  theme(strip.background =element_rect(fill="white"),
+        plot.title = element_text(size = 11),
+        axis.text = element_text(size = 7),
+        axis.title = element_text(size = 9),
+        strip.text = element_text(size = 9)) +
   facet_wrap( ~ variable) + 
-  scale_y_log10() + 
-  stat_pvalue_manual(data = ar_area_clust_pvals, label = "p.final", y.position = 1.3, vjust=1.2, size = 3, parse = TRUE, remove.bracket = TRUE) + 
+  scale_y_continuous(trans = "log10", limits = c(1e-6, 10), breaks = c(1e-6, 1e-4, 1e-2, 1, 100), expand = expansion(mult = c(0, 0))) + 
+  stat_pvalue_manual(data = ar_area_clust_pvals, label = "p.final", y.position = 5, vjust=1.2, size = 3, parse = TRUE, remove.bracket = TRUE) + 
   scale_fill_manual(values = palette_tilclust) + 
   xlab("") + 
   ylab("Proportion") + 
@@ -193,11 +212,11 @@ tumor_pdl1_ido1_plot <- ggplot(ar_area_long_labeled, aes(x=clust_map, y=proporti
 ```
 
 
-```{r, fig.width = 8, fig.height = 10}
+```{r, fig.width = 6.7, fig.height = 10}
 #| label: fig-tilclust-ardensities
-top_row <- plot_grid(pd1pos_prop_plot + ggtitle("CD8+ T cells") + theme(plot.title = element_text(hjust = 0.5, face = "bold")), cd8_treg_ratio_plot + ggtitle (" ") + theme(legend.position = "none"), labels = c("a", "b"), rel_widths = c(0.5, 0.5), nrow = 1)
+top_row <- plot_grid(pd1pos_prop_plot, cd8_treg_ratio_plot + ggtitle (" ") + theme(legend.position = "none"), labels = c("A", "B"), rel_widths = c(0.5, 0.5), nrow = 1, label_size = 12)
 
-plot_grid(legend, top_row, mac_densities_plot, tumor_pdl1_ido1_plot, nrow = 4, labels = c("", "", "c", "d"), rel_heights = c(0.2, 1, 1, 1))
+plot_grid(legend, top_row, mac_densities_plot, tumor_pdl1_ido1_plot, nrow = 4, labels = c("", "", "C", "D"), rel_heights = c(0.2, 1, 1, 1), label_size = 12)
 ```
 
 ```{r}
@@ -207,3 +226,42 @@ plot_grid(legend, top_row, mac_densities_plot, tumor_pdl1_ido1_plot, nrow = 4, l
 tcyto_densities_plot
 ```
 
+```{r}
+bt_densities_cyto_treg_clean <- bt_densities_cyto_treg %>%
+  filter(!is.infinite(cyto_treg_ratio), region == "Epithelial") %>%
+  dplyr::select(acc_num, cyto_treg_ratio)
+
+clinical_long_clust_assignments_tcyto_treg <- clinical_long_clust_assignments %>%
+  dplyr::inner_join(bt_densities_cyto_treg_clean)
+
+cox_fits_tcyto_treg <- lapply(unique_outcomes, function(x) {
+  df <- clinical_long_clust_assignments_tcyto_treg %>% 
+    dplyr::mutate(cyto_treg_ratio = log(cyto_treg_ratio+1)) %>%
+    filter(outcome == x) %>%
+    dplyr::rename(
+      Age=age_dx,
+      TIL=clust_map,
+      Epi_Cyto_Treg=cyto_treg_ratio,
+      Chemotherapy=chemo,
+      Radiotherapy=rt,
+      Brachytherapy=brachy,
+      Stage=stage_main
+    ) %>%
+    mutate(
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich"))
+    )
+  cox_fit <- coxph(Surv(time, status) ~  Age + Epi_Cyto_Treg + Chemotherapy + Radiotherapy + Brachytherapy + Stage, data = df)
+  
+  return(cox_fit)
+})
+names(cox_fits_tcyto_treg) <- unique_outcomes
+
+cox_tables_tcyto_treg <- lapply(cox_fits_tcyto_treg, function(cox_fit) {
+  cox_table <- cox_fit %>% tbl_regression(exponentiate = TRUE, show_single_row = c("Chemotherapy", "Radiotherapy", "Brachytherapy"), pvalue_fun = function(x) style_pvalue(x, digits = 2))
+  
+  return(cox_table)
+})
+
+cox_tables_tcyto_treg_merged <- tbl_merge(tbls = cox_tables_tcyto_treg,
+          tab_spanner = c("Overall survival", "Progression-free survival", "Disease-specific survival"))
+```

@@ -18,17 +18,29 @@ library(flextable)
 ```{r}
 columns_to_count <- c("Stage", "Grade", "Histotype", "LVI", "Nodes", "Myo", "Chemotherapy", "Radiotherapy", "Brachytherapy")
 
+capitalize_names <- function(x) {
+  str_to_sentence(x) %>% str_replace_all("mmmt", "MMMT")
+}
+
+palette_histotype_capitalized <- palette_histotype
+names(palette_histotype_capitalized) <- capitalize_names(names(palette_histotype_capitalized))
+
+palette_myo_capitalized <- palette_myo
+names(palette_myo_capitalized) <- capitalize_names(names(palette_myo_capitalized))
+
 palette_grade_missing <- c(palette_grade, "Missing"="#FFFFFF")
 palette_lvi_missing <- c(palette_lvi, "Missing"="#FFFFFF")
 palette_nodes_missing <- c(palette_nodes, "Missing"="#FFFFFF")
-palette_myo_missing <- c(palette_myo, "Missing"="#FFFFFF")
+palette_myo_missing <- c(palette_myo_capitalized, "Missing"="#FFFFFF")
 palette_stage_missing <- c(palette_stage, "Missing"="#FFFFFF")
 
 metatable_full_unique <- metatable_full %>%
   dplyr::select(-c(TMA, `B & T`, `Adaptive Resistance`, Cohort)) %>%
   dplyr::mutate(across(c("Grade", "Histotype", "LVI", "Nodes", "Myo", "Chemotherapy", "Brachytherapy", "Stage"), ~replace_na(as.character(.x), "Missing"))) %>%
+  dplyr::mutate(Histotype = capitalize_names(Histotype),
+                Myo = capitalize_names(Myo)) %>%
   dplyr::mutate(
-    Histotype = factor(Histotype, levels = names(palette_histotype)),
+    Histotype = factor(Histotype, levels = intersect(names(palette_histotype_capitalized), unique(Histotype))),
     Grade = factor(Grade, levels = names(palette_grade_missing)),
     LVI = factor(LVI, levels = names(palette_lvi_missing)),
     Nodes = factor(Nodes, levels = names(palette_nodes_missing)),
@@ -49,14 +61,24 @@ renamed_columns <- lapply(columns_to_count, function(x) {
 })
 names(renamed_columns) <- columns_to_count
 
+renamed_columns$Age <- list(direction = "horizontal")
+renamed_columns$Stage <- c(renamed_columns$Stage, nrow = 2)
+renamed_columns$Grade <- c(renamed_columns$Grade, nrow = 2)
+renamed_columns$Nodes <- c(renamed_columns$Nodes, nrow = 2)
+renamed_columns$Myo <- c(renamed_columns$Myo, nrow = 2)
+renamed_columns$LVI <- c(renamed_columns$LVI, nrow = 2)
+renamed_columns$Chemotherapy <- c(renamed_columns$Chemotherapy, nrow = 1)
+renamed_columns$Radiotherapy <- c(renamed_columns$Radiotherapy, nrow = 1)
+renamed_columns$Brachytherapy <- c(renamed_columns$Brachytherapy, nrow = 1)
+
 cohort_df_unique <- metatable_full_unique %>% dplyr::select(-c(acc_num, Neoadjuvant, Subtype)) %>% as.data.frame
 
-cohort_plot_bottom <- columnAnnotation(df = cohort_df_unique, 
+cohort_plot_bottom <- rowAnnotation(df = cohort_df_unique, 
                                        col = list(
                                          #Cohort=palette_cohort,
                                          Age=colorRamp2(c(min(metatable_full$Age, na.rm = TRUE),  max(metatable_full$Age, na.rm = TRUE)), c("lightgray", "#2E294E")),
                                          Grade=palette_grade_missing,
-                                         Histotype=palette_histotype,
+                                         Histotype=palette_histotype_capitalized,
                                          LVI=palette_lvi_missing,
                                          Nodes=palette_nodes_missing,
                                          Myo=palette_myo_missing,
@@ -67,7 +89,8 @@ cohort_plot_bottom <- columnAnnotation(df = cohort_df_unique,
                                          Stage=palette_stage_missing
                                        ), 
                                        na_col = "white",
-                                       annotation_legend_param = renamed_columns
+                                       annotation_legend_param = renamed_columns,
+                                    annotation_name_rot = 45
 )
 
 cohort_plot_top <- columnAnnotation(df = cohort_df_unique, 
@@ -79,13 +102,13 @@ cohort_plot_top <- columnAnnotation(df = cohort_df_unique,
                                     ))
 ```
 
-```{r, fig.width = 19, fig.height = 7, fig.align = 'center'}
+```{r, fig.width = 10, fig.height = 8, fig.align = 'center'}
 #| label: fig-cohort-track
 #| fig-cap: "Cohort overview"
 #| fig-alt: "Cohort overview. Find out what's going on with angiogenesis."
-cohort_track <- Heatmap(matrix(nc = nrow(metatable_full_unique %>% dplyr::select(-c(acc_num, Neoadjuvant, Subtype)) %>% as.data.frame), nr = 0), 
+cohort_track <- Heatmap(matrix(nr = nrow(metatable_full_unique %>% dplyr::select(-c(acc_num, Neoadjuvant, Subtype)) %>% as.data.frame), nc = 0), 
 	#top_annotation = cohort_plot_top, bottom_annotation = cohort_plot_bottom)
-	bottom_annotation = cohort_plot_bottom)
+	left_annotation = cohort_plot_bottom)
 
 draw(cohort_track, annotation_legend_side = "bottom")
 ```

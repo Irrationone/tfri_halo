@@ -149,12 +149,12 @@ metatable_clinical <- clinical %>%
   dplyr::rename(Cohort=cohort, Subtype=eclass2_ngs, Age=age_dx, Stage=stage_main, Grade=grade_rev, Histotype=hist_rev,
          LVI=lvi, Nodes=nodes, Myo=myo, Neoadjuvant=neoadj, Chemotherapy=chemo, Radiotherapy=rt, Brachytherapy=brachy) %>%
   mutate(
-    LVI = dplyr::recode(LVI, 'negative'='-', 'positive'='+ (unspecified)', 'focal'='+ (focal)', 'extensive'='+ (extensive)'),
+    LVI = dplyr::recode(LVI, 'negative'='-', 'positive'='+ (Unspecified)', 'focal'='+ (Focal)', 'extensive'='+ (Extensive)'),
     Nodes = dplyr::recode(Nodes, 'negative'='-', 'positive'='+')
   ) %>%
   mutate(
     Grade = factor(Grade, levels = c("1", "2", "3")),
-    LVI = factor(LVI, levels = c("-", "+ (unspecified)", "+ (focal)", "+ (extensive)")),
+    LVI = factor(LVI, levels = c("-", "+ (Unspecified)", "+ (Focal)", "+ (Extensive)")),
     Nodes = factor(Nodes, levels = c("-", "+")),
     Myo = factor(Myo, levels = c("none", "1-50%", ">50%")),
     Neoadjuvant = factor(Neoadjuvant, levels = c("chemo only", "horm only", "RT only", "yes/NOS", "none")),
@@ -194,6 +194,7 @@ palette_stage <- colorscheme_brewer(metatable_clinical$Stage, 'Reds')
 palette_grade <- colorscheme_brewer(metatable_clinical$Grade, 'Oranges')
 palette_lvi <- colorscheme_brewer(metatable_clinical$LVI, 'Purples')
 palette_histotype <- colorscheme_brewer(metatable_clinical$Histotype, 'Set3')
+palette_histotype <- c(palette_histotype[setdiff(names(palette_histotype), "other")], palette_histotype["other"])
 palette_subtype <- colorscheme_brewer(metatable_clinical$Subtype, 'Set2')
 palette_myo <- colorscheme_brewer(metatable_clinical$Myo, 'Reds')
 palette_neoadjuvant <- colorscheme_brewer(metatable_clinical$Neoadjuvant, 'Set2')
@@ -637,7 +638,20 @@ km_fits <- lapply(unique_outcomes, function(x) {
                        xlim = c(0, 13),
                        break.x.by = 3,
                        ggtheme = theme_pubr())
-    return(list(fit=fit, plot=plot$plot + theme(plot.title = ggtext::element_markdown(hjust = 0.5)), pval=pval))
+    
+    plot$table$data <- plot$table$data %>% dplyr::mutate(strata = clust_map)
+    plot$table$layers[[1]]$data$strata <- plot$table$layers[[1]]$data$clust_map
+    plot$table$scales$scales[[2]]$labels <- c("TIL-rich", "TIL-poor")
+    plot$table$scales$scales[[2]]$breaks <- c("TIL-poor", "TIL-rich")
+    plot$table$theme$axis.text.y$margin <- margin(0, 20, 0, 0)
+    plot$table$theme$axis.text.y$size <- 9
+    plot$table$layers[[1]]$aes_params$size <- 3
+
+    plot$table <- plot$table + theme(axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_blank()) + scale_x_continuous(expand = expansion(0,0)) + coord_cartesian(clip = 'off')
+    plot$plot <- plot$plot + theme(plot.title = ggtext::element_markdown(size = 11, hjust = 0.5), axis.title.x = element_text(size = 9), axis.title.y = element_text(size = 9), axis.text.x = element_text(size=7), axis.text.y = element_text(size = 7)) + scale_y_continuous(expand = expansion(0, 0)) + scale_x_continuous(expand = expansion(0,0))
+    plot$plot <- plot$plot + ylab(toupper(x)) + xlab("Time (years)")
+    
+    return(list(fit=fit, plot=plot, pval=pval))
   })
   names(tmp) <- unique_stage
   return(tmp)
@@ -670,7 +684,20 @@ km_chemo_fits <- lapply(unique_outcomes, function(x) {
                        xlim = c(0, 13),
                        break.x.by = 3,
                        ggtheme = theme_pubr())
-    return(list(fit=fit, plot=plot$plot + theme(plot.title = ggtext::element_markdown(hjust = 0.5)), pval=pval))
+    
+    plot$table$data <- plot$table$data %>% dplyr::mutate(strata = clust_map)
+    plot$table$layers[[1]]$data$strata <- plot$table$layers[[1]]$data$clust_map
+    plot$table$scales$scales[[2]]$labels <- c("TIL-rich", "TIL-poor")
+    plot$table$scales$scales[[2]]$breaks <- c("TIL-poor", "TIL-rich")
+    plot$table$theme$axis.text.y$margin <- margin(0, 20, 0, 0)
+    plot$table$theme$axis.text.y$size <- 9
+    plot$table$layers[[1]]$aes_params$size <- 3
+
+    plot$table <- plot$table + theme(axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_blank()) + scale_x_continuous(expand = expansion(0,0)) + coord_cartesian(clip = 'off')
+    plot$plot <- plot$plot + theme(plot.title = ggtext::element_markdown(size = 11, hjust = 0.5), axis.title.x = element_text(size = 9), axis.title.y = element_text(size = 9), axis.text.x = element_text(size=7), axis.text.y = element_text(size = 7)) + scale_y_continuous(expand = expansion(0, 0)) + scale_x_continuous(expand = expansion(0,0))
+    plot$plot <- plot$plot + ylab(toupper(x)) + xlab("Time (years)")
+    
+    return(list(fit=fit, plot=plot, pval=pval))
   })
   names(tmp) <- unique_chemo
   return(tmp)
@@ -699,7 +726,20 @@ km_stage_chemo_fits <- lapply(unique_outcomes, function(x) {
                          xlim = c(0, 13),
                          break.x.by = 3,
                          ggtheme = theme_pubr())
-      return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+      
+    plot$table$data <- plot$table$data %>% dplyr::mutate(strata = clust_map)
+    plot$table$layers[[1]]$data$strata <- plot$table$layers[[1]]$data$clust_map
+    plot$table$scales$scales[[2]]$labels <- c("TIL-rich", "TIL-poor")
+    plot$table$scales$scales[[2]]$breaks <- c("TIL-poor", "TIL-rich")
+    plot$table$theme$axis.text.y$margin <- margin(0, 20, 0, 0)
+    plot$table$theme$axis.text.y$size <- 9
+    plot$table$layers[[1]]$aes_params$size <- 3
+
+    plot$table <- plot$table + theme(axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_blank()) + scale_x_continuous(expand = expansion(0,0)) + coord_cartesian(clip = 'off')
+    plot$plot <- plot$plot + theme(plot.title = ggtext::element_markdown(size = 11, hjust = 0.5), axis.title.x = element_text(size = 9), axis.title.y = element_text(size = 9), axis.text.x = element_text(size=7), axis.text.y = element_text(size = 7)) + scale_y_continuous(expand = expansion(0, 0)) + scale_x_continuous(expand = expansion(0,0))
+    plot$plot <- plot$plot + ylab(toupper(x)) + xlab("Time (years)")
+      
+      return(list(fit=fit, plot=plot, pval=pval))
     })
     names(tmp) <- unique_chemo
     return(tmp)
@@ -713,7 +753,8 @@ names(km_stage_chemo_fits) <- unique_outcomes
 ```{r}
 unique_rt <- c(FALSE, TRUE)
 km_stage_rt_fits <- lapply(unique_outcomes, function(x) {
-  tmp1 <- lapply(c("I", "II", "III", "IV"), function(stage_opt) {
+  # null model for stage IV
+  tmp1 <- lapply(c("I", "II", "III"), function(stage_opt) {
     tmp <- lapply(unique_rt, function(rt_opt) {
       df <- clinical_long_clust_assignments %>% filter(outcome == x, stage_main == stage_opt, rt == rt_opt)
       fit <- survfit(Surv(time, status) ~ clust_map, 
@@ -731,12 +772,25 @@ km_stage_rt_fits <- lapply(unique_outcomes, function(x) {
                          xlim = c(0, 13),
                          break.x.by = 3,
                          ggtheme = theme_pubr())
-      return(list(fit=fit, plot=plot$plot + theme(plot.title = element_text(hjust = 0.5)), pval=pval))
+      
+    plot$table$data <- plot$table$data %>% dplyr::mutate(strata = clust_map)
+    plot$table$layers[[1]]$data$strata <- plot$table$layers[[1]]$data$clust_map
+    plot$table$scales$scales[[2]]$labels <- c("TIL-rich", "TIL-poor")
+    plot$table$scales$scales[[2]]$breaks <- c("TIL-poor", "TIL-rich")
+    plot$table$theme$axis.text.y$margin <- margin(0, 20, 0, 0)
+    plot$table$theme$axis.text.y$size <- 9
+    plot$table$layers[[1]]$aes_params$size <- 3
+
+    plot$table <- plot$table + theme(axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_blank()) + scale_x_continuous(expand = expansion(0,0)) + coord_cartesian(clip = 'off')
+    plot$plot <- plot$plot + theme(plot.title = ggtext::element_markdown(size = 11, hjust = 0.5), axis.title.x = element_text(size = 9), axis.title.y = element_text(size = 9), axis.text.x = element_text(size=7), axis.text.y = element_text(size = 7)) + scale_y_continuous(expand = expansion(0, 0)) + scale_x_continuous(expand = expansion(0,0))
+    plot$plot <- plot$plot + ylab(toupper(x)) + xlab("Time (years)")
+      
+      return(list(fit=fit, plot=plot, pval=pval))
     })
     names(tmp) <- unique_rt
     return(tmp)
   })
-  names(tmp1) <- c("I", "II", "III", "IV")
+  names(tmp1) <- c("I", "II", "III")
   return(tmp1)
 })
 names(km_stage_rt_fits) <- unique_outcomes
@@ -855,6 +909,319 @@ her2_ihc_clust_assignments <- clust_assignments_map %>%
   inner_join(her2_ihc) %>%
   inner_join(metatable_full) %>%
   filter(Subtype == "p53abn")
+
+her2_summary <- her2_ihc_clust_assignments %>% 
+  dplyr::select(c(acc_num, clust_map, patient_id, study_id, her2_ihc, sWGS, ploidy)) %>%
+  unique %>%
+  dplyr::mutate(
+    HER2=(sWGS %in% c("Amplification", "High Amplification")) | (her2_ihc == 3)
+  )
+
+clinical_annotations_comb_tma <- metatable_clinical %>%
+  select(acc_num, Grade, Histotype, Neoadjuvant, Subtype, Stage) %>%
+  unique %>%
+  left_join(clust_assignments_map)
+
+cnsig_merged <- cnsig_exposures %>% 
+  inner_join(clinical_annotations_comb_tma)
+
+cnsig_merged_long <- cnsig_merged %>% 
+  pivot_longer(cols = colnames(cnsig_merged)[str_detect(colnames(cnsig_merged), "^(VS|BS)")],
+               names_to = "signature", 
+               values_to = "exposure") %>%
+  unique %>%
+  filter(!is.na(clust_map),
+         str_detect(signature, "^VS"))
+
+## Overview plot by marker type
+signature_summary <- cnsig_merged_long %>% 
+  dplyr::select(c(patient_id, study_id, acc_num, max_van_sig)) %>% 
+  unique %>% 
+  dplyr::mutate(
+    `HRD CN signature` = (max_van_sig == "VS5")
+  )
+```
+
+```{r}
+p53_mutation_data <- read_excel(here("data/raw/bc-1822_p53_mutation_type_2024-12-16.xlsx"), sheet = 1)
+
+p53_clinical <- clinical %>% 
+  dplyr::select(study_id, acc_num, tma) %>%
+  unique %>%
+  dplyr::inner_join(p53_mutation_data) %>%
+  dplyr::select(-c(study_id)) %>% 
+  unique %>%
+  dplyr::filter(acc_num %in% metatable_full$acc_num)
+
+p53_clinical_clust_assignments <- p53_clinical %>%
+  dplyr::inner_join(clust_assignments_map)
 ```
 
 
+```{r}
+clinical_long_clust_assignments_p53 <- clinical_long_clust_assignments %>%
+  dplyr::inner_join(p53_clinical_clust_assignments %>% dplyr::select(acc_num, p53) %>% unique)
+
+unique_p53 <- c("overexpression", "null")
+km_stage_p53_fits <- lapply(unique_outcomes, function(x) {
+  # null model for stage IV
+  tmp1 <- lapply(c("I", "II", "III", "IV"), function(stage_opt) {
+    tmp <- lapply(unique_p53, function(p53_opt) {
+      df <- clinical_long_clust_assignments_p53 %>% filter(outcome == x, stage_main == stage_opt, p53 == p53_opt)
+      fit <- survfit(Surv(time, status) ~ clust_map, 
+                     data = df)
+      pval <- surv_pvalue(fit, data = df)
+      plot <- ggsurvplot(fit,
+                         data = df,
+                         pval = FALSE,
+                         pval.method = FALSE,
+                         conf.int = TRUE,
+                         risk.table = TRUE, 
+                         title = paste0("Stage ", stage_opt, " p53 ", p53_opt, " (n=", length(unique(intersect(df$acc_num, metatable_full$acc_num))), ", ", str_replace_all(pval$pval.txt, " ", ""), ")"),
+                         legend = "none",
+                         palette = unname(palette_tilclust),
+                         xlim = c(0, 13),
+                         break.x.by = 3,
+                         ggtheme = theme_pubr())
+      
+    plot$table$data <- plot$table$data %>% dplyr::mutate(strata = clust_map)
+    plot$table$layers[[1]]$data$strata <- plot$table$layers[[1]]$data$clust_map
+    plot$table$scales$scales[[2]]$labels <- c("TIL-rich", "TIL-poor")
+    plot$table$scales$scales[[2]]$breaks <- c("TIL-poor", "TIL-rich")
+    plot$table$theme$axis.text.y$margin <- margin(0, 20, 0, 0)
+    plot$table$theme$axis.text.y$size <- 9
+    plot$table$layers[[1]]$aes_params$size <- 3
+
+    plot$table <- plot$table + theme(axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_blank()) + scale_x_continuous(expand = expansion(0,0)) + coord_cartesian(clip = 'off')
+    plot$plot <- plot$plot + theme(plot.title = ggtext::element_markdown(size = 11, hjust = 0.5), axis.title.x = element_text(size = 9), axis.title.y = element_text(size = 9), axis.text.x = element_text(size=7), axis.text.y = element_text(size = 7)) + scale_y_continuous(expand = expansion(0, 0)) + scale_x_continuous(expand = expansion(0,0))
+    plot$plot <- plot$plot + ylab(toupper(x)) + xlab("Time (years)")
+      
+      return(list(fit=fit, plot=plot, pval=pval))
+    })
+    names(tmp) <- unique_rt
+    return(tmp)
+  })
+  names(tmp1) <- c("I", "II", "III", "IV")
+  return(tmp1)
+})
+names(km_stage_p53_fits) <- unique_outcomes
+```
+
+```{r}
+clinical_long_clust_assignments_her2_hrd <- clinical_long_clust_assignments %>% 
+  dplyr::inner_join(her2_summary) %>%
+  dplyr::inner_join(signature_summary)
+
+cox_fits_her2_hrd <- lapply(unique_outcomes, function(x) {
+  df <- clinical_long_clust_assignments_her2_hrd %>% 
+    filter(outcome == x) %>%
+    dplyr::rename(
+      Age=age_dx,
+      TIL=clust_map,
+      Chemotherapy=chemo,
+      Radiotherapy=rt,
+      Brachytherapy=brachy,
+      Stage=stage_main
+    ) %>%
+    mutate(
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich"))
+    )
+  cox_fit <- coxph(Surv(time, status) ~  Age + TIL + Chemotherapy + Radiotherapy + Brachytherapy + Stage + `HRD CN signature` + HER2, data = df)
+  
+  return(cox_fit)
+})
+names(cox_fits_her2_hrd) <- unique_outcomes
+```
+```{r}
+bt_carcinosarcoma <- metatable_full %>% 
+  filter(Histotype == "carcinosarcoma (MMMT)") %>% 
+  dplyr::select(TMA, acc_num, Histotype) %>% 
+  unique %>% 
+  dplyr::inner_join(bt %>% unique)
+
+carcinosarcoma_annotation_file <- here::here("data", "raw", "carcinosarcoma_annotations.xlsx")
+carcinosarcoma_annotations <- read_excel(carcinosarcoma_annotation_file, sheet = "Carcinosarcoma", skip = 2)
+carcinosarcoma_core_map <- read_excel(carcinosarcoma_annotation_file, sheet = "Core ID", skip = 2) %>%
+  dplyr::select(CoreID, `Accession #`) %>%
+  dplyr::rename(acc_num=`Accession #`) %>%
+  dplyr::mutate(acc_num=str_replace(acc_num, "-(0+)", "-"))
+
+carcinosarcoma_annotations_clean <- carcinosarcoma_annotations[,1:9]
+colnames(carcinosarcoma_annotations_clean) <- c("CoreID", "location", "pct_tumor", "component", "B",  "Plasma", "Treg", "T helper", "CD8+ T")
+
+carcinosarcoma_annotations_clean <- carcinosarcoma_annotations_clean %>%
+  dplyr::mutate(component = dplyr::recode(component, "Epi"="Carcinoma", "Sarc"="Sarcoma")) %>%
+  dplyr::left_join(carcinosarcoma_core_map) %>%
+  group_by(acc_num) %>%
+  fill(location, .direction = "downup") %>%
+  ungroup() %>%
+  dplyr::mutate(tma = ifelse(CoreID >= 157, "22-004B", "22-004A"))
+
+carcinosarcoma_annotations_clean$sector <- sapply(str_split(carcinosarcoma_annotations_clean$location, ","),
+                                                  function(x) x[[1]])
+carcinosarcoma_annotations_clean$col <- sapply(str_split(carcinosarcoma_annotations_clean$location, ","),
+                                                  function(x) x[[2]])
+carcinosarcoma_annotations_clean$row <- sapply(str_split(carcinosarcoma_annotations_clean$location, ","),
+                                                  function(x) x[[3]])
+
+bt_carcinosarcoma_merged <- bt_carcinosarcoma %>%
+  dplyr::mutate(sector = as.character(sector),
+                col = as.character(col)) %>%
+  dplyr::select(acc_num, tma, sector, row, col, area_tumour_mm, area_stroma_mm) %>%
+  unique %>%
+  dplyr::right_join(carcinosarcoma_annotations_clean)
+
+bt_carcinosarcoma_long <- bt_carcinosarcoma_merged %>%
+  pivot_longer(cols = c("B", "Plasma", "Treg", "T helper", "CD8+ T"),
+               names_to = "tiltype",
+               values_to = "count") %>%
+  dplyr::mutate(area=(pct_tumor/100)*area_tumour_mm) %>%
+  dplyr::select(acc_num, tma, sector, row, col, area, component, tiltype, count) %>%
+  dplyr::group_by(acc_num, component, tiltype) %>%
+  dplyr::summarise(count = sum(count),
+                   area = sum(area)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(count = replace_na(count, 0),
+                density = count/area)
+```
+
+```{r}
+anatomic_site_table <- read_excel(here::here("data", "raw", "bc-1822_p53_mutation_type_for_anatomic_site_lookup.xlsx"), sheet = 1)
+
+anatomic_site_clinical <- clinical %>% 
+  dplyr::filter(eclass2_ngs == "p53abn") %>%
+  dplyr::select(study_id, acc_num, tma) %>%
+  unique %>%
+  dplyr::inner_join(anatomic_site_table) %>%
+  dplyr::select(-c(study_id)) %>% 
+  unique
+```
+
+```{r}
+convert_sectormap_to_long <- function(sectormap) {
+  sectormat <- as.matrix(sectormap)
+  
+  nr <- nrow(sectormat)
+  nc <- ncol(sectormat)
+  
+  heading_locs <- str_detect(sectormat, "^Sector") %>% which
+  heading_rows <- heading_locs %% nr
+  heading_cols <- floor(heading_locs / nr) + 1
+  
+  core_map <- lapply(1:length(heading_rows), function(i) {
+    start_row <- heading_rows[i]
+    start_col <- heading_cols[i]
+    
+    end_row <- min(heading_rows[heading_rows > start_row] - 1, nr, na.rm = TRUE)
+    end_col <- min(heading_cols[heading_cols > start_col] - 1, nc, na.rm = TRUE)
+    
+    sector_label <- str_extract(sectormat[start_row, start_col], "[0-9]+")
+    
+    df <- sectormat[start_row:end_row,start_col:end_col] %>% 
+      as_tibble %>% 
+      janitor::row_to_names(row_number = 1)
+    colnames(df)[1] <- "row"
+    
+    all_na_cols <- sapply(df, function(x) all(is.na(x)))
+    
+    df <- df[,!all_na_cols]
+    
+    df %>%
+      gather(col, core, -row) %>%
+      filter(!is.na(core)) %>%
+      mutate(core = trimws(as.character(core)), sector = trimws(as.character(sector_label)), col = trimws(col), row = trimws(row)) %>%
+      arrange(as.numeric(row), as.numeric(col))
+  }) %>% bind_rows()
+  
+  return(core_map)
+}
+```
+
+```{r}
+rb_maps <- list(
+  '10-005'=read_excel(here::here("data", "raw", "RB_results", "10-005 - RB.xlsx"), skip = 1, sheet = 1, col_names = FALSE),
+  '10-006'=read_excel(here::here("data", "raw", "RB_results", "10-006 - RB.xlsx"), skip = 1, sheet = 1, col_names = FALSE),
+  '22-004A'=read_excel(here::here("data", "raw", "RB_results", "22-004_revised_map_RB_Stain.xlsx"), skip = 2, sheet = 5, col_names = FALSE),
+  '22-004B'=read_excel(here::here("data", "raw", "RB_results", "22-004_revised_map_RB_Stain.xlsx"), skip = 2, sheet = 6, col_names = FALSE)
+)
+
+core_maps <- list(
+  '10-005'=read_excel(here::here("data", "raw", "RB_results", "10-005 G3 Endometrioid Endometrial Carcinoma.xls"), skip = 2, sheet = 3, col_names = FALSE),
+  '10-006'=read_excel(here::here("data", "raw", "RB_results", "10-006 High-Grade Serous Endometrial Carcinoma.xls"), skip = 2, sheet = 3, col_names = FALSE),
+  '22-004A'=read_excel(here::here("data", "raw", "RB_results", "22-004_revised_map_RB_Stain.xlsx"), skip = 2, sheet = 3, col_names = FALSE),
+  '22-004B'=read_excel(here::here("data", "raw", "RB_results", "22-004_revised_map_RB_Stain.xlsx"), skip = 2, sheet = 4, col_names = FALSE)
+)
+
+
+
+rb_scores <- lapply(rb_maps, function(x) convert_sectormap_to_long(x)) %>%
+  bind_rows(.id = "tma") %>%
+  dplyr::mutate(core = dplyr::case_match(
+    core,
+    "NT" ~ "nt",
+    "NIC" ~ "nic",
+    "0" ~ "lost",
+    .default = "retained"
+  )) %>%
+  dplyr::rename(RB=core)
+
+core_match <- lapply(core_maps, function(x) convert_sectormap_to_long(x)) %>%
+  bind_rows(.id = "tma")
+
+rb_scores <- rb_scores %>%
+  dplyr::left_join(core_match) %>%
+  dplyr::mutate(tma = str_replace_all(tma, "[AB]$", ""))
+
+rb_data_merged <- rb_scores %>%
+  dplyr::select(tma, core, RB) %>%
+  dplyr::rename(core_id=core) %>%
+  dplyr::mutate(core_id = as.numeric(core_id)) %>%
+  dplyr::left_join(clinical %>%
+                     dplyr::select(acc_num, tma, core_id) %>%
+                     unique) %>%
+  dplyr::inner_join(clust_assignments_map)
+
+rb_data_merged_clean <- rb_data_merged %>%
+  dplyr::filter(RB %in% c("retained", "lost")) %>%
+  dplyr::group_by(acc_num, clust_map) %>%
+  dplyr::summarise(RB=ifelse(all(RB == "lost"),
+                             "lost",
+                             ifelse(
+                               all(RB == "retained"),
+                               "retained",
+                               "subclonal"
+                             ))) %>%
+  ungroup() %>%
+  dplyr::filter(acc_num %in% metatable_full$acc_num)
+
+with(rb_data_merged_clean, table(clust_map, RB)) %>% fisher.test
+with(rb_data_merged_clean, table(clust_map, RB)) %>% chisq.test
+```
+
+```{r}
+clinical_long_clust_assignments_rb <- clinical_long_clust_assignments %>% 
+  dplyr::inner_join(rb_data_merged_clean)
+
+cox_fits_rb <- lapply(unique_outcomes, function(x) {
+  df <- clinical_long_clust_assignments_rb %>% 
+    dplyr::mutate(RB = ifelse(RB == "subclonal", "lost", RB)) %>%
+    filter(outcome == x) %>%
+    dplyr::rename(
+      Age=age_dx,
+      TIL=clust_map,
+      `RB loss`=RB,
+      Chemotherapy=chemo,
+      Radiotherapy=rt,
+      Brachytherapy=brachy,
+      Stage=stage_main
+    ) %>%
+    mutate(
+      TIL=factor(TIL, labels = c("TIL-poor", "TIL-rich")),
+      `RB loss`=factor(`RB loss`, levels = c("retained", "lost"), labels = c("retained", "lost"))
+    )
+  cox_fit <- coxph(Surv(time, status) ~  Age + TIL + `RB loss` + Chemotherapy + Radiotherapy + Brachytherapy + Stage, data = df)
+  
+  return(cox_fit)
+})
+names(cox_fits_rb) <- unique_outcomes
+```
